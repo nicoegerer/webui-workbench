@@ -18,6 +18,15 @@ pre-merge release baseline. Tests, build and the runtime contract must pass befo
 non-forced push updates all three branches. Conflicts stop publication without discarding changes.
 The feature/default branch receives release fixes too, so its scheduled workflow stays current.
 
+The schedule runs daily at 06:17 UTC without a manual trigger. After 45 days without
+a commit, a no-change sync creates one empty maintenance commit on the shared feature/
+release history; this prevents GitHub's public-repository 60-day inactivity shutdown.
+It does not change source files, increment the version or publish another application update.
+No personal token, always-on computer or external scheduler is required. GitHub Actions
+must remain enabled; actual merge conflicts or failed compatibility checks still require repair.
+Changes to the sync workflow/scripts on the default branch also run the workflow automatically,
+so deploying this one-time setup verifies the live wiring without a manual workflow dispatch.
+
 The workflow explicitly dispatches `release.yml`: a `GITHUB_TOKEN` push does not trigger
 another push workflow. A no-change run checks for a published Windows update manifest and
 can recover a missing release, without duplicating a running build. This is a tested integration
@@ -33,6 +42,13 @@ starting the server upgrades older Open WebUI installations to the version carri
 desktop release. Explicit user pins, disabled updates, and newer/custom runtimes are preserved.
 Runtime upgrades still require package-registry access; on failure the existing runtime starts
 and the failure is logged. The runtime version remains visible in Open WebUI.
+
+Packaged desktop apps check this fork's release feed at launch and every six hours,
+download verified updates automatically, and install them on normal application quit.
+They never force a restart while a chat is running. The next launch upgrades the backend
+to that release's tested version (with a database backup first). No ZIP/source checkout
+replacement is needed. The in-chat upstream update notice can appear before the fork's
+daily integration, compatibility tests and platform packages have finished.
 
 ## Conversation workspaces
 

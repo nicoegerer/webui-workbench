@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { prepareSync, nextServicesVersion } from '../.github/scripts/prepare-upstream-sync.mjs'
+import { keepSyncActive } from '../.github/scripts/keep-sync-active.mjs'
 
 const fixture = (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'desktop-sync-test-'))
@@ -100,6 +101,43 @@ test('versioning is monotonic and rejects malformed release data', () => {
   assert.equal(nextServicesVersion('0.0.20-services.25', '0.0.21'), '0.0.21-services.1')
   assert.equal(nextServicesVersion('0.0.20-services.25', '0.0.19'), '0.0.20-services.26')
   assert.throws(() => nextServicesVersion('0.0.20-services.25', '0.0.21rc1'))
+})
+
+test('45 quiet days keep scheduling alive without source changes or another release', (t) => {
+  const f = fixture(t)
+  const lastCommit = Number(f.git('show', '-s', '--format=%ct', 'HEAD')) * 1000
+  const day = 24 * 60 * 60 * 1000
+  const tree = f.git('rev-parse', 'HEAD^{tree}')
+  assert.equal(keepSyncActive(f.cwd, lastCommit + 44 * day), false)
+  assert.equal(keepSyncActive(f.cwd, lastCommit + 45 * day), true)
+  assert.equal(f.git('rev-parse', 'HEAD^{tree}'), tree)
+  assert.equal(keepSyncActive(f.cwd, lastCommit + 46 * day), false)
+  const result = prepareSync(f.cwd, 'v0.11.1')
+  assert.equal(result.changed, false)
+  assert.equal(result.version, '0.0.20-services.25')
+})
+
+test('maintenance refuses local changes and invalid timestamps', (t) => {
+  const f = fixture(t)
+  assert.throws(() => keepSyncActive(f.cwd, NaN), /timestamp/)
+  f.write('local-edit.txt', 'must not be committed')
+  assert.throws(() => keepSyncActive(f.cwd), /clean checkout/)
+  assert.equal(f.git('status', '--porcelain'), '?? local-edit.txt')
+})
+
+test('sync is scheduled without manual dispatch and maintenance cannot publish a version', () => {
+  const source = readFileSync(
+    new URL('../.github/workflows/sync-upstream.yml', import.meta.url),
+    'utf8'
+  )
+  assert.match(source, /schedule:\s*\n\s*- cron: '17 6 \* \* \*'/)
+  assert.match(source, /push:\s*\n\s*branches: \[managed-services\]/)
+  assert.match(
+    source,
+    /if: steps\.candidate\.outputs\.changed == 'false'\s*\n\s*run: node \.github\/scripts\/keep-sync-active\.mjs/
+  )
+  assert.ok(source.indexOf('keep-sync-active.mjs') < source.indexOf('git push --atomic'))
+  assert.ok(source.includes('if [ "$CHANGED" = "true" ]; then'))
 })
 
 test('workflow explicitly dispatches releases and keeps the default branch current', () => {

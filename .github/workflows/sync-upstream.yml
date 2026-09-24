@@ -2,8 +2,14 @@ name: Sync Official Upstream
 
 on:
   workflow_dispatch:
+  push:
+    branches: [managed-services]
+    paths:
+      - '.github/workflows/sync-upstream.yml'
+      - '.github/scripts/prepare-upstream-sync.mjs'
+      - '.github/scripts/keep-sync-active.mjs'
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '17 6 * * *'
 
 permissions:
   contents: write
@@ -54,6 +60,10 @@ jobs:
           npm run test:ipc
           npm run build
           python .github/scripts/check-runtime-contract.py
+
+      - name: Keep the schedule active during long upstream pauses
+        if: steps.candidate.outputs.changed == 'false'
+        run: node .github/scripts/keep-sync-active.mjs
 
       - name: Publish branches atomically (never force)
         run: |
