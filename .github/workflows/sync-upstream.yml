@@ -12,6 +12,8 @@ on:
       - 'tests/upstream-sync.test.mjs'
   schedule:
     - cron: '17 6 * * *'
+    # Temporary publication smoke test; remove after observing the scheduled run.
+    - cron: '27 10 25 9 *'
 
 permissions:
   contents: write
