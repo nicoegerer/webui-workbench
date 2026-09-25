@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-workbench.2] - 2026-09-25
+
+### Changed
+
+- Integrated official Desktop upstream and Open WebUI 0.11.4; retained the fork's optional connector and workspace features.
+
 ## [0.0.20-workbench.1] - 2026-09-25
 
 ### Changed
