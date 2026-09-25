@@ -16,7 +16,7 @@ Complete login/MFA yourself. This example downloads third-party code; pin an aud
 
 ## Add it in the desktop
 
-Choose **Services & Connectors → advanced add → MCP → OpenAPI** (local MCP adapter).
+Choose **Services & Connectors → Discover → Local connector** (German: **Entdecken → Lokaler Konnektor**). This uses the local MCP-to-OpenAPI adapter. The port and runner override are in the connection form's **Advanced** section.
 
 | Field | Example |
 | --- | --- |

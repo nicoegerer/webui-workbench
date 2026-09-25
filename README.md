@@ -19,7 +19,7 @@ The connector manager, filesystem tools and preview features remain available. A
 | Services & Connectors | Manage optional local processes, local MCP adapters and remote MCP endpoints | You install/authenticate providers and choose which to enable |
 | Local workspaces | Select your real project folder; let a tool-capable model read, write and run commands | Commands run with your OS account's permissions, not in a sandbox |
 | GitHub workspaces | Browse repositories and read/write text files in a selected branch | Writes create commits; this is not a hosted shell or Codespace |
-| Website preview | View supported static sites and running local web apps beside the chat | Cloud source projects must contain a built static site; no cloud build service |
+| Website preview | View supported static HTML sites beside the chat | Build framework output first; no development-server proxy or cloud build service |
 | Update integration | Automatically test and merge official upstream changes, then build fork updates | Conflicts or failed checks stop publication and need maintenance |
 
 Chat, models, notes, voice features and the underlying web interface come from upstream. See the [change map and release policy](docs/upstream-and-releases.md) for the distinction and known limitations.

@@ -29,13 +29,13 @@ The next request uses the new selection. Old paths quoted in conversation histor
 The conditional **Preview / Vorschau** tab appears beside **Controls / Steuerung** and **Files / Dateien** when a supported preview target is available.
 
 - **Local static site:** open a supported HTML entry point with its relative assets.
-- **Local application:** use a supported running loopback web server. Starting/building dependencies is a separate action.
+- **Local framework project:** build static output first, then select its HTML entry point. The Preview tab is not a proxy for an arbitrary development server; use your browser for a running development server.
 - **Cloud static site:** preview committed HTML and assets through the authenticated repository bridge.
 - **Cloud framework source:** JSX, Astro, Vue or similar source alone is not a built website. Produce static output first or use local development. Preview is not a deployment to GitHub Pages.
 
 Changing the workspace invalidates the previous preview. Relative assets must exist and use the expected path/case. Server-side applications and arbitrary private backend APIs cannot be represented by a static repository preview.
 
-Generated pages run without the desktop IPC bridge; this does not mean arbitrary websites are trustworthy or network-free.
+Generated pages run without the desktop IPC bridge. The preview blocks external connections, forms and embedded frames; bundle assets locally instead of depending on a CDN. These restrictions do not make untrusted code generally safe outside the preview.
 
 ## Troubleshooting
 
@@ -44,7 +44,7 @@ Generated pages run without the desktop IPC bridge; this does not mean arbitrary
 | Files from an old folder | Current chat, selected chip, activation result and Files breadcrumb |
 | Model prints code only | Real tool availability, provider tool support, enabled workspace |
 | GitHub 404 | Account/token access, repo and branch; private repos may conceal permission failures |
-| Preview tab missing | Supported entry point/build output or active local server |
+| Preview tab missing | Supported HTML entry point/build output in the selected workspace |
 | Preview asset missing | Commit/save the referenced asset and check relative paths |
 | Actions dispatch accepted but no website | Inspect the actual Actions run/logs and Pages configuration |
 

@@ -36,7 +36,7 @@ Remote instances must be protected with appropriate authentication, TLS and netw
 
 ## Preview and updates
 
-Preview pages do not receive desktop IPC privileges; they can still contain untrusted code or network requests. Do not load untrusted sites as though they were inert text.
+Preview pages do not receive desktop IPC privileges. Their policy blocks external connections and forms, but pages can still contain untrusted code. Do not treat the same files as safe when opened in an unrestricted browser.
 
 Release manifests/checksums protect update integrity within the configured feed; they are not proof of trusted maintainership or a security audit. Unsigned builds may produce OS warnings. Verify the source and review what you install.
 

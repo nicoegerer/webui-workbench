@@ -8,6 +8,7 @@ on:
       - '.github/workflows/sync-upstream.yml'
       - '.github/scripts/prepare-upstream-sync.mjs'
       - '.github/scripts/keep-sync-active.mjs'
+      - '.github/scripts/check-public-distribution.mjs'
   schedule:
     - cron: '17 6 * * *'
 

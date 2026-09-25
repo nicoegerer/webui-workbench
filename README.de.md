@@ -10,7 +10,7 @@ Ein **inoffizieller Fork von [Open WebUI Desktop](https://github.com/open-webui/
 - **Eigene Dienste wählen:** Unter **Einstellungen → Dienste & Konnektoren** selbst hinzufügen. Aktivierte Konnektoren stehen anschließend allen Chats zur Verfügung; dort lassen sie sich pausieren oder entfernen.
 - **Lokale Arbeitsbereiche:** Deinen echten Projektordner auswählen. Ein werkzeugfähiges Modell kann dort Dateien bearbeiten und Befehle ausführen.
 - **Cloud-Arbeitsbereiche:** Dateien im ausgewählten GitHub-Repository und Branch bearbeiten; Schreiben erzeugt Commits. Kein Cloud-Terminal.
-- **Vorschau:** Unterstützte statische Websites oder laufende lokale Webserver im Seitenbereich ansehen.
+- **Vorschau:** Unterstützte statische HTML-Websites im Seitenbereich ansehen; Framework-Projekte vorher bauen.
 - **Updates:** Automatische Upstream-Prüfung und getestete Fork-Releases, ohne wiederholt ZIP-Dateien herunterzuladen. Konflikte können weiterhin Wartung erfordern.
 
 ## Einstieg

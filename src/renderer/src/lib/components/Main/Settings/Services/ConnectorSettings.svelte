@@ -750,8 +750,8 @@
               bind:value={draft.accessToken}
             /><small
               >{l(
-                'Wird lokal verschlüsselt gespeichert. Teile nur die benötigten Berechtigungen.',
-                'Stored encrypted on this computer. Grant only the permissions you need.'
+                'Lokal gespeichert, mit Betriebssystem-Verschlüsselung wenn verfügbar. Teile nur die benötigten Berechtigungen.',
+                'Stored locally, with OS encryption when available. Grant only the permissions you need.'
               )}</small
             ></label
           >

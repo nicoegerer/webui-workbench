@@ -12,7 +12,7 @@ All connections are optional. A fresh profile contains an empty registry. Discov
 | An OpenAI-compatible model endpoint | Open WebUI administrator model Connections |
 | GitHub | [GitHub guide](integrations/github.md) |
 | Garmin through a local MCP server | [Garmin guide](integrations/garmin.md) |
-| A local stdio MCP server | Advanced add → MCP → OpenAPI |
+| A local stdio MCP server | Discover → Local connector (mcpo adapter) |
 | An existing Streamable HTTP MCP endpoint | Remote MCP / custom remote connector |
 | A background executable such as OmniRoute | Advanced add → Local process |
 
