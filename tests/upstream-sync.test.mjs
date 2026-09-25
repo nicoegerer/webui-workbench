@@ -6,7 +6,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
 import { runInNewContext } from 'node:vm'
-import { prepareSync, nextServicesVersion } from '../.github/scripts/prepare-upstream-sync.mjs'
+import {
+  prepareSync,
+  nextServicesVersion,
+  mergeForkManifest,
+  mergeChangelogAdditions
+} from '../.github/scripts/prepare-upstream-sync.mjs'
 import { keepSyncActive } from '../.github/scripts/keep-sync-active.mjs'
 
 const fixture = (t) => {
@@ -98,6 +103,128 @@ test('the renamed Workbench distribution keeps its identity through an automatic
   assert.equal(prepareSync(f.cwd, 'v0.11.4').changed, false)
 })
 
+test('official Desktop version bumps preserve fork identity and both dependency additions', (t) => {
+  const f = fixture(t)
+  const originalChangelog = readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8')
+  f.write('package.json', {
+    name: 'webui-workbench',
+    version: '0.0.20-workbench.2',
+    dependencies: { 'fork-tool': '1.0.0' }
+  })
+  f.write('package-lock.json', {
+    name: 'webui-workbench',
+    version: '0.0.20-workbench.2',
+    packages: {
+      '': {
+        name: 'webui-workbench',
+        version: '0.0.20-workbench.2',
+        dependencies: { 'fork-tool': '1.0.0' }
+      },
+      'node_modules/fork-tool': { version: '1.0.0' }
+    }
+  })
+  f.write(
+    'CHANGELOG.md',
+    originalChangelog.replace('\n## [', '\n## [0.0.20-workbench.2]\n\nFork notes\n\n## [')
+  )
+  f.commit('fork identity and dependency')
+  f.git('checkout', 'main')
+  f.write('package.json', {
+    name: 'fixture',
+    version: '0.0.21',
+    dependencies: { 'official-tool': '2.0.0' }
+  })
+  f.write('package-lock.json', {
+    name: 'fixture',
+    version: '0.0.21',
+    packages: {
+      '': { name: 'fixture', version: '0.0.21', dependencies: { 'official-tool': '2.0.0' } },
+      'node_modules/official-tool': { version: '2.0.0' }
+    }
+  })
+  f.write(
+    'CHANGELOG.md',
+    originalChangelog.replace('\n## [', '\n## [0.0.21]\n\nNew official release\n\n## [')
+  )
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('official version and dependency'))
+  f.git('checkout', 'release')
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').version, '0.0.21-workbench.1')
+  const pkg = JSON.parse(readFileSync(join(f.cwd, 'package.json')))
+  const lock = JSON.parse(readFileSync(join(f.cwd, 'package-lock.json')))
+  assert.equal(pkg.name, 'webui-workbench')
+  assert.deepEqual(pkg.dependencies, { 'fork-tool': '1.0.0', 'official-tool': '2.0.0' })
+  assert.equal(lock.name, pkg.name)
+  assert.equal(lock.packages[''].name, pkg.name)
+  assert.equal(lock.packages[''].version, pkg.version)
+  assert.ok(lock.packages['node_modules/fork-tool'])
+  assert.ok(lock.packages['node_modules/official-tool'])
+  const changelog = readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8')
+  for (const heading of ['0.0.21-workbench.1', '0.0.20-workbench.2', '0.0.21', '0.0.20']) {
+    assert.equal(changelog.split(`## [${heading}]`).length, 2)
+  }
+  f.git('merge-base', '--is-ancestor', 'upstream/main', 'HEAD')
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').changed, false)
+})
+
+test('manifest reconciliation keeps deletions and never chooses a conflicting dependency silently', () => {
+  assert.deepEqual(
+    mergeForkManifest(
+      'package.json',
+      { dependencies: { removed: '1', shared: '1' } },
+      { dependencies: { shared: '1' } },
+      { dependencies: { removed: '1', shared: '2' } }
+    ),
+    { dependencies: { shared: '2' } }
+  )
+  for (const [base, ours, theirs] of [
+    [
+      { dependencies: { shared: '1' } },
+      { dependencies: { shared: '2' } },
+      { dependencies: { shared: '3' } }
+    ],
+    [{ dependencies: { shared: '1' } }, { dependencies: {} }, { dependencies: { shared: '3' } }],
+    [{ files: ['base'] }, { files: ['fork'] }, { files: ['official'] }]
+  ]) {
+    assert.throws(() => mergeForkManifest('package.json', base, ours, theirs), /Unresolved/)
+  }
+  assert.throws(() => mergeForkManifest('arbitrary.json', {}, {}, {}), /Only object-shaped/)
+  const prototypeKey = JSON.parse('{"__proto__":{"retained":true}}')
+  const merged = mergeForkManifest('package.json', {}, prototypeKey, { extra: true })
+  assert.ok(Object.hasOwn(merged, '__proto__'))
+  assert.equal(Object.getPrototypeOf(merged), Object.prototype)
+  assert.equal({}.retained, undefined)
+})
+
+test('changelog reconciliation refuses edited history or overlapping new version notes', () => {
+  const base = '# Changelog\n\n## [1.0.0]\n\nOriginal\n'
+  const ours = base.replace('\n## [', '\n## [1.1.0]\n\nFork\n\n## [')
+  const theirs = base.replace('\n## [', '\n## [1.1.0]\n\nOfficial\n\n## [')
+  assert.throws(() => mergeChangelogAdditions(base, ours, theirs), /Overlapping/)
+  assert.throws(
+    () => mergeChangelogAdditions(base, ours, base.replace('Original', 'Edited')),
+    /Existing/
+  )
+  assert.equal(mergeChangelogAdditions(base, ours, base), ours)
+})
+
+test('conflicting dependency updates abort without changing refs or leaving conflict files', (t) => {
+  const f = fixture(t)
+  f.write('package.json', {
+    name: 'fixture',
+    version: '0.0.20-services.25',
+    dependencies: { shared: '2' }
+  })
+  const before = f.commit('fork dependency')
+  f.git('checkout', 'main')
+  f.write('package.json', { name: 'fixture', version: '0.0.21', dependencies: { shared: '3' } })
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('conflicting official dependency'))
+  f.git('checkout', 'release')
+  assert.throws(() => prepareSync(f.cwd, 'v0.11.4'), /merge conflict/)
+  assert.equal(f.git('rev-parse', 'HEAD'), before)
+  assert.equal(f.git('status', '--porcelain'), '')
+  assert.equal(JSON.parse(readFileSync(join(f.cwd, 'package.json'))).dependencies.shared, '2')
+})
+
 test('merge conflicts and a diverged mirror fail closed without rewriting refs', (t) => {
   const f = fixture(t)
   f.write('shared.txt', 'fork\n')
@@ -151,9 +278,16 @@ test('sync is scheduled without manual dispatch and maintenance cannot publish a
     'utf8'
   )
   assert.match(source, /schedule:\s*\n\s*- cron: '17 6 \* \* \*'/)
+  assert.equal(
+    (source.match(/cron:/g) ?? []).length,
+    1,
+    'temporary publication schedules must be removed'
+  )
   assert.match(source, /push:\s*\n\s*branches: \[managed-services\]/)
   assert.ok(source.includes("- 'tests/upstream-sync.test.mjs'"))
-  assert.ok(source.includes("if: steps.candidate.outputs.changed == 'true' || github.event_name == 'push'"))
+  assert.ok(
+    source.includes("if: steps.candidate.outputs.changed == 'true' || github.event_name == 'push'")
+  )
   assert.match(
     source,
     /if: steps\.candidate\.outputs\.changed == 'false'\s*\n\s*run: node \.github\/scripts\/keep-sync-active\.mjs/

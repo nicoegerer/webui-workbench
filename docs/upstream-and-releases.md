@@ -25,12 +25,14 @@ This release adds neutral first-run behavior (including removal of legacy OmniRo
 
 The default branch is `managed-services` (historical name). `main` mirrors official Desktop; `release` builds the fork.
 
-1. GitHub Actions checks daily at **06:17 UTC**; runs can be delayed by GitHub.
+1. GitHub Actions is scheduled daily at **06:17 UTC**. GitHub can delay scheduled runs, sometimes substantially; this is not a precise-time guarantee.
 2. It fetches official Desktop `main` and the latest stable Open WebUI runtime release.
 3. It merges into a candidate, keeps fork changes and updates `src/shared/runtime-versions.json` when needed.
 4. Unit/regression tests, build and the runtime compatibility contract must pass before an atomic, non-forced push.
 5. The workflow explicitly starts the release pipeline because pushes made by `GITHUB_TOKEN` do not trigger another push workflow. Users do not need to click Run workflow.
 6. All required platform packaging jobs must pass before release assets and matching update manifests are published.
+
+Routine version/identity overlaps in `package.json` and `package-lock.json` use a constrained three-way merge: fork-owned identity fields stay local, independent official dependency changes are retained, and competing dependency changes fail closed. New Changelog sections are combined only when the existing history and preamble are unchanged. This avoids asking the maintainer to resolve an ordinary version bump without silently preferring fork dependencies or discarding upstream notes.
 
 Changes to the sync workflow/scripts on the default branch also trigger verification automatically. After 45 quiet days, a no-change maintenance commit keeps public-repository scheduling active; it does not change the app version. Actions must remain enabled and permitted to write contents and dispatch workflows. No personal token or always-on desktop is required.
 

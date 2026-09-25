@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 export const compareStable = (left, right) => {
   const parse = (value) => {
@@ -21,6 +22,107 @@ export function nextServicesVersion(previous, upstream) {
   return `${newerBase ? upstream : match[1]}-${match[2]}.${newerBase ? 1 : Number(match[3]) + 1}`
 }
 
+/** Three-way merge, never an unconditional "ours" dependency/lockfile strategy. */
+export function mergeForkManifest(file, base, ours, theirs) {
+  const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const ownValue = (value, key) => (value && Object.hasOwn(value, key) ? value[key] : undefined)
+  const ownedIdentity = (path) =>
+    (path.length === 1 &&
+      (file === 'package.json'
+        ? ['name', 'version', 'description', 'homepage', 'repository', 'bugs']
+        : ['name', 'version']
+      ).includes(path[0])) ||
+    (file === 'package-lock.json' &&
+      path.length === 3 &&
+      path[0] === 'packages' &&
+      path[1] === '' &&
+      ['name', 'version'].includes(path[2]))
+  const merge = (ancestor, local, incoming, path) => {
+    if (isDeepStrictEqual(local, incoming) || isDeepStrictEqual(incoming, ancestor)) return local
+    if (isDeepStrictEqual(local, ancestor)) return incoming
+    if (ownedIdentity(path)) return local
+    if (object(local) && object(incoming) && (object(ancestor) || ancestor === undefined)) {
+      const entries = []
+      for (const key of new Set([
+        ...Object.keys(ancestor ?? {}),
+        ...Object.keys(local),
+        ...Object.keys(incoming)
+      ])) {
+        const value = merge(
+          ownValue(ancestor, key),
+          ownValue(local, key),
+          ownValue(incoming, key),
+          [...path, key]
+        )
+        if (value !== undefined) entries.push([key, value])
+      }
+      return Object.fromEntries(entries)
+    }
+    throw new Error(`Unresolved manifest conflict: ${file} ${JSON.stringify(path)}`)
+  }
+  if (
+    !['package.json', 'package-lock.json'].includes(file) ||
+    ![base, ours, theirs].every(object)
+  ) {
+    throw new Error('Only object-shaped package manifests may be reconciled')
+  }
+  return merge(base, ours, theirs, [])
+}
+
+/** Retain both new release-note sections only when existing history is unchanged. */
+export function mergeChangelogAdditions(base, ours, theirs) {
+  const normalize = (text) => text.replace(/\r\n/g, '\n').trimEnd() + '\n'
+  ;[base, ours, theirs] = [base, ours, theirs].map(normalize)
+  if (ours === theirs || theirs === base) return ours
+  if (ours === base) return theirs
+  const index = base.indexOf('\n## [')
+  if (index < 0) throw new Error('No common changelog version history')
+  const preamble = base.slice(0, index),
+    history = base.slice(index)
+  const additions = (text) => {
+    if (!text.startsWith(preamble) || !text.endsWith(history)) {
+      throw new Error('Existing changelog content changed; manual review required')
+    }
+    const added = text.slice(preamble.length, text.length - history.length)
+    if (added && !added.startsWith('\n## [')) throw new Error('Unrecognized changelog insertion')
+    return added
+  }
+  const local = additions(ours),
+    incoming = additions(theirs)
+  const versions = (text) => [...text.matchAll(/^## \[([^\]]+)\]/gm)].map((match) => match[1])
+  const allVersions = [...versions(local), ...versions(incoming), ...versions(history)]
+  if (new Set(allVersions).size !== allVersions.length) {
+    throw new Error('Overlapping changelog versions require manual review')
+  }
+  return preamble + local + incoming + history
+}
+
+function mergeOfficialUpstream(cwd, git) {
+  try {
+    git('merge', '--no-edit', 'upstream/main')
+  } catch (cause) {
+    const files = git('diff', '--name-only', '--diff-filter=U', '-z').split('\0').filter(Boolean)
+    if (!files.length) throw cause
+    // Resolve every conflict in memory first. Any unrelated conflict aborts the merge.
+    const reconciled = files.map((file) => {
+      if (!['package.json', 'package-lock.json', 'CHANGELOG.md'].includes(file)) throw cause
+      const versions = [1, 2, 3].map((stage) => git('show', `:${stage}:${file}`))
+      const content =
+        file === 'CHANGELOG.md'
+          ? mergeChangelogAdditions(...versions)
+          : JSON.stringify(
+              mergeForkManifest(file, ...versions.map((text) => JSON.parse(text))),
+              null,
+              2
+            ) + '\n'
+      return [file, content]
+    })
+    for (const [file, content] of reconciled) writeFileSync(resolve(cwd, file), content)
+    git('add', '--', ...files)
+    git('commit', '--no-edit')
+  }
+}
+
 /** Prepare only. CI tests the candidate before atomically pushing any branch. */
 export function prepareSync(cwd, backendTag) {
   const git = (...args) =>
@@ -36,7 +138,7 @@ export function prepareSync(cwd, backendTag) {
   compareStable(backendVersion, backendVersion)
   try {
     git('merge', '--no-edit', 'origin/managed-services')
-    git('merge', '--no-edit', 'upstream/main')
+    mergeOfficialUpstream(cwd, git)
   } catch (error) {
     try {
       git('merge', '--abort')
