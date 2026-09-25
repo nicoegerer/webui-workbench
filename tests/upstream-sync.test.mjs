@@ -152,6 +152,8 @@ test('sync is scheduled without manual dispatch and maintenance cannot publish a
   )
   assert.match(source, /schedule:\s*\n\s*- cron: '17 6 \* \* \*'/)
   assert.match(source, /push:\s*\n\s*branches: \[managed-services\]/)
+  assert.ok(source.includes("- 'tests/upstream-sync.test.mjs'"))
+  assert.ok(source.includes("if: steps.candidate.outputs.changed == 'true' || github.event_name == 'push'"))
   assert.match(
     source,
     /if: steps\.candidate\.outputs\.changed == 'false'\s*\n\s*run: node \.github\/scripts\/keep-sync-active\.mjs/

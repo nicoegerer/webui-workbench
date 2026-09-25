@@ -9,6 +9,7 @@ on:
       - '.github/scripts/prepare-upstream-sync.mjs'
       - '.github/scripts/keep-sync-active.mjs'
       - '.github/scripts/check-public-distribution.mjs'
+      - 'tests/upstream-sync.test.mjs'
   schedule:
     - cron: '17 6 * * *'
 
