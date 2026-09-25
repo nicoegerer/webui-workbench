@@ -1,6 +1,6 @@
 {
   "name": "webui-workbench",
-  "version": "0.0.20-workbench.2",
+  "version": "0.0.20-workbench.3",
   "license": "AGPL-3.0",
   "description": "Unofficial Open WebUI Desktop fork with optional connectors and local or GitHub workspaces",
   "main": "./out/main/index.js",
