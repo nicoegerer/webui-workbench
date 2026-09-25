@@ -1,5 +1,5 @@
-appId: com.openwebui.desktop
-productName: Open WebUI
+appId: io.github.nicoegerer.webuiworkbench
+productName: WebUI Workbench
 directories:
   buildResources: build
 files:
@@ -20,7 +20,7 @@ asarUnpack:
   - resources/**
   - node_modules/node-pty/**
 win:
-  executableName: open-webui
+  executableName: webui-workbench
 nsis:
   artifactName: ${name}-${arch}-setup.${ext}
   shortcutName: ${productName}
@@ -59,7 +59,7 @@ linux:
     - snap
     - deb
     - flatpak
-  maintainer: openwebui.com
+  maintainer: nicoegerer
   category: Utility
 deb:
   artifactName: ${name}_${arch}.${ext}
@@ -88,4 +88,4 @@ npmRebuild: true
 publish:
   provider: github
   owner: nicoegerer
-  repo: desktop
+  repo: webui-workbench

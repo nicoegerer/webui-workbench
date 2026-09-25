@@ -15,10 +15,10 @@ export const compareStable = (left, right) => {
 }
 
 export function nextServicesVersion(previous, upstream) {
-  const match = /^(\d+\.\d+\.\d+)-services\.(\d+)$/.exec(previous)
-  if (!match) throw new Error(`Not a Services release: ${previous}`)
+  const match = /^(\d+\.\d+\.\d+)-(services|workbench)\.(\d+)$/.exec(previous)
+  if (!match) throw new Error(`Not a fork release: ${previous}`)
   const newerBase = compareStable(upstream, match[1]) > 0
-  return `${newerBase ? upstream : match[1]}-services.${newerBase ? 1 : Number(match[2]) + 1}`
+  return `${newerBase ? upstream : match[1]}-${match[2]}.${newerBase ? 1 : Number(match[3]) + 1}`
 }
 
 /** Prepare only. CI tests the candidate before atomically pushing any branch. */
@@ -65,7 +65,7 @@ export function prepareSync(cwd, backendTag) {
   const changelogPath = resolve(cwd, 'CHANGELOG.md')
   const changelog = readFileSync(changelogPath, 'utf8')
   const index = changelog.indexOf('\n## [')
-  const entry = `\n## [${version}] - ${new Date().toISOString().slice(0, 10)}\n\n### Changed\n\n- Integrated official Desktop upstream and Open WebUI ${runtime.openWebUI}; retained all Services Edition changes.\n`
+  const entry = `\n## [${version}] - ${new Date().toISOString().slice(0, 10)}\n\n### Changed\n\n- Integrated official Desktop upstream and Open WebUI ${runtime.openWebUI}; retained the fork's optional connector and workspace features.\n`
   writeFileSync(
     changelogPath,
     index < 0 ? changelog + entry : changelog.slice(0, index) + entry + changelog.slice(index)

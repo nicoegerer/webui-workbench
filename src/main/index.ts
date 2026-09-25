@@ -124,6 +124,12 @@ import {
 import { initUpdater, checkForUpdates, downloadUpdate, installUpdate } from './updater'
 import runtimeVersions from '../shared/runtime-versions.json'
 import { runtimeUpgradeVersion } from '../shared/services/runtime-update'
+import { FORK_NAME, FORK_APP_ID, FORK_PROFILE_DIRECTORY, FORK_REPOSITORY } from '../shared/fork-info'
+
+// Isolate this distribution before any profile, log, service or session is opened.
+// Never silently adopt a user's existing Open WebUI Desktop installation.
+app.setName(FORK_NAME)
+app.setPath('userData', join(app.getPath('appData'), FORK_PROFILE_DIRECTORY))
 
 import log from 'electron-log'
 log.transports.file.resolvePathFn = () => getLogFilePath('main')
@@ -1287,24 +1293,23 @@ if (!gotTheLock) {
   })
 
   app.setAboutPanelOptions({
-    applicationName: 'Open WebUI',
+    applicationName: FORK_NAME,
     iconPath: icon,
     applicationVersion: app.getVersion(),
     version: app.getVersion(),
-    website: 'https://openwebui.com',
+    website: FORK_REPOSITORY,
     copyright: `© ${new Date().getFullYear()} Open WebUI`
   })
 
   app.whenReady().then(async () => {
     CONFIG = await getConfig()
     loadSpotlightPosition()
-    log.info('Config:', CONFIG)
+    log.info('Configuration loaded')
 
-    app.name = 'Open WebUI'
     if (process.platform === 'darwin' && app.dock) {
       app.dock.setIcon(icon)
     }
-    electronApp.setAppUserModelId('com.openwebui.desktop')
+    electronApp.setAppUserModelId(FORK_APP_ID)
 
     // The desktop registry owns part of Open WebUI's configuration. Registering
     // it from the main process keeps it independent of whether a webview

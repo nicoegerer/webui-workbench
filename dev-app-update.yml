@@ -1,4 +1,4 @@
 provider: github
 owner: nicoegerer
-repo: desktop
-updaterCacheDirName: desktop-updater
+repo: webui-workbench
+updaterCacheDirName: webui-workbench-updater

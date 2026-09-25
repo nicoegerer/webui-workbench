@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Mirror upstream and publish Services Edition update
+    name: Mirror upstream and publish Workbench fork update
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}

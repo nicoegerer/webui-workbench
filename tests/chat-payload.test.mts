@@ -150,7 +150,7 @@ test('a cloud workspace names the repository and keeps its mounted terminal', ()
     patch({
       selection: {
         mode: 'cloud',
-        repoFullName: 'nicoegerer/test1',
+        repoFullName: 'example/first-project',
         branch: 'main',
         terminalId: 'desktop-gh-test1'
       }
@@ -161,7 +161,7 @@ test('a cloud workspace names the repository and keeps its mounted terminal', ()
   assert.deepEqual(out.tool_ids, ['server:desktop-workspace-desktop-gh-test1', ...CONNECTORS])
   const messages = out.messages as Array<Record<string, string>>
   assert.equal(messages[0].role, 'system')
-  assert.ok(messages[0].content.includes('nicoegerer/test1'))
+  assert.ok(messages[0].content.includes('example/first-project'))
   assert.ok(messages[0].content.includes('`main`'))
   assert.ok(messages[0].content.includes('write_file'))
   assert.ok(messages[0].content.includes('commit'))
@@ -172,7 +172,7 @@ test('the instruction is placed after the existing system prompt, not before it'
   const out = applyWorkspaceToPayload(
     { messages: [{ role: 'system', content: 'Antworte auf Deutsch.' }, ...userTurn()] },
     patch({
-      selection: { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' }
+      selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' }
     })
   )
 
@@ -207,24 +207,24 @@ test('scoped cloud file writes survive large always-on connector catalogs', () =
 test('switching workspace mid-chat does not stack instructions', () => {
   const first = applyWorkspaceToPayload(
     { messages: userTurn() },
-    patch({ selection: { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' } })
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' } })
   )
   const second = applyWorkspaceToPayload(
     first,
-    patch({ selection: { mode: 'cloud', repoFullName: 'nicoegerer/desktop', branch: 'release' } })
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/second-project', branch: 'release' } })
   )
 
   const messages = second.messages as Array<Record<string, string>>
   const instructions = messages.filter((m) => m.content?.includes(CLOUD_INSTRUCTION_MARKER))
   assert.equal(instructions.length, 1)
-  assert.ok(instructions[0].content.includes('nicoegerer/desktop'))
+  assert.ok(instructions[0].content.includes('example/second-project'))
   assert.ok(!instructions[0].content.includes('test1'))
 })
 
 test('switching from cloud back to local removes the instruction', () => {
   const cloud = applyWorkspaceToPayload(
     { messages: userTurn() },
-    patch({ selection: { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' } })
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' } })
   )
   const local = applyWorkspaceToPayload(
     cloud,
@@ -239,7 +239,7 @@ test('switching from cloud back to local removes the instruction', () => {
 test('clearing the workspace removes the instruction and leaves the chat intact', () => {
   const cloud = applyWorkspaceToPayload(
     { messages: userTurn() },
-    patch({ selection: { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' } })
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' } })
   )
   const cleared = applyWorkspaceToPayload(cloud, patch({ selection: null }))
 

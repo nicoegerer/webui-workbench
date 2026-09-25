@@ -565,14 +565,14 @@ test('a saved cloud workspace is remounted before the chat request is sent', asy
     {
       'chat-123': {
         mode: 'cloud',
-        repoFullName: 'nicoegerer/test1',
+        repoFullName: 'example/first-project',
         branch: 'main',
         terminalId: 'desktop-gh-old',
-        label: 'nicoegerer/test1'
+        label: 'example/first-project'
       }
     },
     '/c/chat-123',
-    { ok: true, terminal: { id: 'desktop-gh-restored', name: 'nicoegerer/test1' } }
+    { ok: true, terminal: { id: 'desktop-gh-restored', name: 'example/first-project' } }
   )
   const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
 
@@ -586,7 +586,7 @@ test('a saved cloud workspace is remounted before the chat request is sent', asy
   assert.notEqual(h.selectedTerminalId(), 'desktop-ws-desktop')
   const mounts = h.bridge.filter((call) => call.type === 'workspaceMountRepo')
   assert.equal(mounts.length, 1)
-  assert.equal(mounts[0].repoFullName, 'nicoegerer/test1')
+  assert.equal(mounts[0].repoFullName, 'example/first-project')
   assert.equal(mounts[0].branch, 'main')
 })
 
@@ -617,7 +617,7 @@ test('only the workspaces conversations still point at are kept open', async () 
   const h = run({
     'chat-123': { mode: 'local', terminalId: 'desktop-ws-aaa', label: 'test1' },
     'chat-456': { mode: 'local', terminalId: 'desktop-ws-bbb', label: 'desktop' },
-    'chat-789': { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' }
+    'chat-789': { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' }
   })
   await h.settle()
 
@@ -630,7 +630,7 @@ test('only the workspaces conversations still point at are kept open', async () 
 
 test('a cloud-only conversation keeps no folder open', async () => {
   const h = run({
-    'chat-789': { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' }
+    'chat-789': { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' }
   })
   await h.settle()
 
@@ -655,7 +655,7 @@ test('the workspace picked before sending survives the chat getting an id', asyn
   const h = run({
     draft: {
       mode: 'cloud',
-      repoFullName: 'nicoegerer/test1',
+      repoFullName: 'example/first-project',
       branch: 'main',
       terminalId: 'desktop-gh-draft'
     }
@@ -666,7 +666,7 @@ test('the workspace picked before sending survives the chat getting an id', asyn
 
   const stored = JSON.parse(String(h.storage()['desktop:workspace-selection']))
   assert.ok(!stored.draft, 'the draft slot should have been handed over')
-  assert.equal(stored['chat-123'].repoFullName, 'nicoegerer/test1')
+  assert.equal(stored['chat-123'].repoFullName, 'example/first-project')
   assert.equal(h.selectedTerminalId(), 'desktop-gh-draft')
 })
 
@@ -704,10 +704,10 @@ test('a mounted repository is kept alive like a folder', async () => {
   const h = run({
     'chat-123': {
       mode: 'cloud',
-      repoFullName: 'nicoegerer/test1',
+      repoFullName: 'example/first-project',
       branch: 'main',
       terminalId: 'desktop-gh-abc123def456',
-      label: 'nicoegerer/test1'
+      label: 'example/first-project'
     }
   })
   await h.settle()

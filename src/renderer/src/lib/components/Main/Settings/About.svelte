@@ -176,7 +176,7 @@
   }
 
   const openGithub = () => {
-    window.electronAPI?.openInBrowser?.('https://github.com/open-webui/desktop')
+    window.electronAPI?.openInBrowser?.('https://github.com/nicoegerer/webui-workbench')
   }
 
   const handleCheck = async () => {
@@ -243,6 +243,10 @@
 </script>
 
 <div class="flex flex-col divide-y divide-white/[0.04]">
+  <p class="py-4 text-[13px] opacity-70">
+    WebUI Workbench — unofficial Open WebUI Desktop fork.
+    Open WebUI by Open WebUI Inc. and contributors. Not an official distribution.
+  </p>
   <button
     class="w-full py-4 flex items-center justify-between bg-transparent border-none cursor-default text-[#1d1d1f] dark:text-[#fafafa]"
     onclick={handleVersionClick}

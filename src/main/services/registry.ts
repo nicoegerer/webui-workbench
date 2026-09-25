@@ -11,11 +11,8 @@ import {
   type ManagedServiceDefinition
 } from '../../shared/services/types'
 import { getConfig, getUserDataPath, setConfig, type AppConfig } from '../utils'
-import {
-  createDefaultServices,
-  materializeMcpoService,
-  readLegacyAutostartEnabled
-} from './defaults'
+import { createDefaultServices } from '../../shared/services/empty-registry'
+import { materializeMcpoService } from './defaults'
 import { assertLocalHealthCheckUrl, assertRemoteEndpointUrl, getPortFromService } from './network'
 
 interface SecretPayload {
@@ -206,7 +203,7 @@ export class ManagedServicesRegistry {
     if (this.loaded) return
     const config = await getConfig()
     const raw = (config as unknown as Record<string, unknown>).managedServices
-    const persisted = this.migrate(raw, config)
+    const persisted = this.migrate(raw)
     this.plaintextFallback = await this.readPlaintextFallback()
 
     for (const stored of persisted.services) {
@@ -374,11 +371,11 @@ export class ManagedServicesRegistry {
     return commandForDisplay(service)
   }
 
-  private migrate(raw: unknown, config: AppConfig): PersistedRegistry {
+  private migrate(raw: unknown): PersistedRegistry {
     if (!isRecord(raw)) {
       return {
         schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
-        services: createDefaultServices(readLegacyAutostartEnabled(config))
+        services: createDefaultServices()
       }
     }
 
@@ -392,7 +389,7 @@ export class ManagedServicesRegistry {
     if (!Array.isArray(raw.services)) {
       return {
         schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
-        services: createDefaultServices(readLegacyAutostartEnabled(config))
+        services: createDefaultServices()
       }
     }
 
@@ -463,12 +460,12 @@ export class ManagedServicesRegistry {
 
     const persisted: PersistedRegistry = {
       schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
-      services: [...this.services.values()].map(
-        ({ env, apiKey: _apiKey, accessToken: _accessToken, ...service }) => ({
-          ...service,
-          envKeys: Object.keys(env ?? {})
-        })
-      ),
+      services: [...this.services.values()].map(({ env, ...service }) => {
+        // Dedicated secrets belong only in the credential store, never config.json.
+        delete service.apiKey
+        delete service.accessToken
+        return { ...service, envKeys: Object.keys(env ?? {}) }
+      }),
       ...(encryptionAvailable ? { encryptedSecrets } : {})
     }
 

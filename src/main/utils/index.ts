@@ -961,17 +961,17 @@ export const getConfig = async (): Promise<AppConfig> => {
         ...saved,
         // Versions before services.23 also stored a checkout root and a
         // process-wide cloud selection here. Cloud workspaces are now strictly
-        // per-chat read-only mounts, so only local recent/active state survives.
+        // per-chat mounts, so only local recent/active state survives here.
         workspaces: {
           recent: Array.isArray(savedWorkspaces?.recent) ? savedWorkspaces.recent : [],
           active: Array.isArray(savedWorkspaces?.active) ? savedWorkspaces.active : []
         }
       }
     }
-    return { ...DEFAULT_CONFIG }
+    return structuredClone(DEFAULT_CONFIG)
   } catch (error) {
     log.error('Error reading config, using defaults:', error)
-    return { ...DEFAULT_CONFIG }
+    return structuredClone(DEFAULT_CONFIG)
   }
 }
 

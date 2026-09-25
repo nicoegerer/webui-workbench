@@ -80,6 +80,24 @@ test('upstream-only update merges all official changes and keeps fork fixes', (t
   f.git('merge-base', '--is-ancestor', 'origin/managed-services', 'HEAD')
 })
 
+test('the renamed Workbench distribution keeps its identity through an automatic runtime update', (t) => {
+  const f = fixture(t)
+  f.write('package.json', { name: 'webui-workbench', version: '0.0.20-workbench.1' })
+  f.write('package-lock.json', {
+    name: 'webui-workbench',
+    version: '0.0.20-workbench.1',
+    packages: { '': { name: 'webui-workbench', version: '0.0.20-workbench.1' } }
+  })
+  f.commit('public fork identity')
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').version, '0.0.20-workbench.2')
+  const pkg = JSON.parse(readFileSync(join(f.cwd, 'package.json')))
+  const lock = JSON.parse(readFileSync(join(f.cwd, 'package-lock.json')))
+  assert.equal(pkg.name, 'webui-workbench')
+  assert.equal(lock.packages[''].name, pkg.name)
+  assert.equal(lock.packages[''].version, pkg.version)
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').changed, false)
+})
+
 test('merge conflicts and a diverged mirror fail closed without rewriting refs', (t) => {
   const f = fixture(t)
   f.write('shared.txt', 'fork\n')
@@ -97,6 +115,8 @@ test('merge conflicts and a diverged mirror fail closed without rewriting refs',
 })
 
 test('versioning is monotonic and rejects malformed release data', () => {
+  assert.equal(nextServicesVersion('0.0.20-workbench.1', '0.0.20'), '0.0.20-workbench.2')
+  assert.equal(nextServicesVersion('0.0.20-workbench.1', '0.0.21'), '0.0.21-workbench.1')
   assert.equal(nextServicesVersion('0.0.20-services.25', '0.0.20'), '0.0.20-services.26')
   assert.equal(nextServicesVersion('0.0.20-services.25', '0.0.21'), '0.0.21-services.1')
   assert.equal(nextServicesVersion('0.0.20-services.25', '0.0.19'), '0.0.20-services.26')

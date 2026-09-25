@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.20-workbench.1] - 2026-09-25
+
+### Changed
+
+- Relaunched the public distribution as WebUI Workbench, explicitly an unofficial Open WebUI Desktop fork; upstream history, credit and license notices remain.
+- Fresh installations contain no saved connections or MCPs. Removed legacy OmniRoute auto-creation; all connector setup capabilities remain available.
+- Isolated the application ID, profile directory and update feed from existing Open WebUI Desktop installations. No automatic account/chat migration.
+- Reworked public documentation with GitHub, OmniRoute, Garmin, workspaces, privacy/security and contribution guides; corrected fork download/support links.
+- Kept daily tested upstream integration and unattended releases, with Workbench versioning and regression checks for neutral defaults.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

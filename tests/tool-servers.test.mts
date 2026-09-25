@@ -158,11 +158,11 @@ test('cleaning visible connector defaults is idempotent', () => {
 
 test('a cloud workspace is declared in the system prompt', () => {
   const system = applyCloudWorkspacePrompt('', {
-    repoFullName: 'nicoegerer/test1',
+    repoFullName: 'example/first-project',
     branch: 'main'
   })
 
-  assert.ok(system.includes('nicoegerer/test1'))
+  assert.ok(system.includes('example/first-project'))
   assert.ok(system.includes('`main`'))
   // The model must not go looking for a checkout that was never made.
   assert.ok(system.includes('no local checkout'))
@@ -171,17 +171,17 @@ test('a cloud workspace is declared in the system prompt', () => {
 test('the user’s own system prompt survives a workspace change', () => {
   const mine = 'Antworte immer auf Deutsch.'
   const first = applyCloudWorkspacePrompt(mine, {
-    repoFullName: 'nicoegerer/test1',
+    repoFullName: 'example/first-project',
     branch: 'main'
   })
   const second = applyCloudWorkspacePrompt(first, {
-    repoFullName: 'nicoegerer/desktop',
+    repoFullName: 'example/second-project',
     branch: 'managed-services'
   })
 
   assert.ok(second.startsWith(mine))
-  assert.ok(second.includes('nicoegerer/desktop'))
-  assert.ok(!second.includes('nicoegerer/test1'))
+  assert.ok(second.includes('example/second-project'))
+  assert.ok(!second.includes('example/first-project'))
   // Exactly one managed block, no matter how often the workspace changes.
   assert.equal(second.split(CLOUD_WORKSPACE_MARKER_START).length - 1, 1)
 })
@@ -189,7 +189,7 @@ test('the user’s own system prompt survives a workspace change', () => {
 test('leaving cloud mode removes the block and restores the prompt', () => {
   const mine = 'Antworte immer auf Deutsch.'
   const withWorkspace = applyCloudWorkspacePrompt(mine, {
-    repoFullName: 'nicoegerer/test1',
+    repoFullName: 'example/first-project',
     branch: 'main'
   })
 

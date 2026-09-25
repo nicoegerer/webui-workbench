@@ -1,4 +1,7 @@
-# Managed Services fork notes
+# WebUI Workbench fork notes
+
+User-facing documentation: [README](README.md), [setup guides](docs/services-and-connectors.md)
+and [provenance/update policy](docs/upstream-and-releases.md). This file retains implementation notes.
 
 This fork adds a public, provider-neutral services and connectors layer to Open WebUI Desktop.
 It does not ship personal service definitions, credentials, or provider accounts.
@@ -9,7 +12,7 @@ It does not ship personal service definitions, credentials, or provider accounts
 | --- | --- |
 | `main` | Fast-forward mirror of `open-webui/desktop:main`; no fork-only commits. |
 | `managed-services` | Long-lived public feature branch. Official upstream changes are merged here. |
-| `release` | Packaging branch with the fork update feed and monotonically increasing `services` versions. |
+| `release` | Packaging branch with the fork update feed and monotonically increasing `workbench` versions. |
 
 The daily `sync-upstream.yml` workflow checks both official Desktop commits and stable
 `open-webui/open-webui` releases. It merges all feature and release changes into a candidate,
@@ -93,8 +96,9 @@ requires this real HTTP suite to pass before producing its installer.
 - **Remote endpoint** — an existing HTTP(S) external tool server with an optional encrypted bearer
   token. Provider-specific OAuth still belongs in a provider adapter or backend.
 
-New installations start with an empty registry. An existing enabled OmniRoute autostart setting is
-migrated once for backward compatibility. Existing saved services remain local to the user.
+New installations start with an empty registry. Legacy OmniRoute autostart flags no longer create
+connections. Explicitly saved services remain local to their own profile. This distribution uses the
+separate `webui-workbench` profile and does not import the previous application's settings.
 
 ## Upstream integration surface
 

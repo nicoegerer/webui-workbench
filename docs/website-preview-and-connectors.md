@@ -1,72 +1,10 @@
-# Website preview and connector setup
+# Website preview and connectors
 
-## Preview a generated website
+The public setup documentation is now organized by task:
 
-Select a local folder or Cloud repository in the chat composer, then choose **Vorschau / Preview** beside **Steuerung / Controls** and **Dateien / Files** in the right sidebar. This tab is shown only when a safe HTML entry exists in that workspace. `index.html` is preferred, followed by `index.htm` or another root-level HTML file; Cloud repositories also discover nested HTML pages. Availability refreshes after files are created or removed. The HTML field accepts a workspace-relative file such as `pages/dashboard.html`. **Neu laden** reloads the files after an edit; **Breit / Mobil** changes the viewport width.
+- [Services & Connectors](services-and-connectors.md)
+- [Workspaces and preview](workspaces-and-preview.md)
+- [GitHub](integrations/github.md), [OmniRoute](integrations/omniroute.md), [Garmin](integrations/garmin.md)
+- [Release checks and upstream integration](upstream-and-releases.md)
 
-Changing the workspace or conversation closes the old preview. No new chat is required to change workspaces. Cloud previews read the selected repository and branch through the existing GitHub connector (Contents read permission), without a local checkout. Each page and its assets use a single Git tree; **Neu laden** fetches the latest branch state. The preview occupies the existing sidebar body; its native Controls/Files tabs remain accessible. It does not change the selected workspace.
-
-Local workspace selection uses the exact directory chosen by the user. No checkout, copy, virtual alias or `OpenWebUI Workspaces` directory is created. Previously selected directories remain in Recently used, with their full original paths shown to distinguish identically named projects.
-
-The desktop applies a source-map-verified, column-preserving compatibility fix to the shipped Open WebUI FileNav initialization. Every mount reads the current terminal/session cwd instead of reusing a module-level path from a different draft workspace. The upstream asset is backed up beside the original as `.desktop-original`; upgrades validate the new runtime contract and reapply the fix. Only the local connection's HTTP asset cache is cleared, not cookies or chats.
-
-The preview serves workspace HTML, CSS, JavaScript, images, fonts and media, locally or from GitHub. It is not a development server: server-side apps, external APIs/CDNs, forms, workers and embedded external pages are deliberately blocked. Keep the static assets in the selected workspace. The preview never receives connector credentials or the Electron API. Cloud reads use immutable, size-bounded Git blobs and verify their hashes; symlinks, submodules and incomplete Git trees are not served.
-
-### New empty Cloud repositories
-
-A GitHub repository without a first commit is a valid empty workspace. Its root
-directory displays no files rather than a connection error. The model can use
-`write_file` to create the first requested file and commit; opening the repository
-never creates a README, placeholder or commit on its own. Preview stays hidden until
-an HTML entry exists. Missing permissions, deleted repositories, wrong branches and
-missing subdirectories are not treated as empty repositories.
-
-### Security boundary
-
-- A trusted desktop IPC call supplies a registered workspace terminal ID, never an arbitrary renderer path.
-- Each preview receives a new loopback origin and a preview-only capability; old sessions are closed and their ports are not reused in the same manager lifetime.
-- The iframe is an opaque `sandbox="allow-scripts"` frame. The main process adds the capability only to requests from its own renderer to the currently active preview origin, enabling CSS/modules without granting same-origin privileges.
-- HTTP requests are read-only. Paths, hidden files, symlinks/junctions, Windows alternate data streams and file types are checked. Files outside the selected root are not served.
-- CSP and the Electron subframe navigation guard block external network access and navigation into the authenticated app.
-
-## Services and connectors
-
-**Deine / Yours** lists desktop-managed connections, their state and the main action. **Entdecken / Discover** searches the catalog and opens provider-specific setup. Technical process settings, import/export and destructive actions remain available under advanced/details controls. Existing IDs, credentials and environment settings are preserved when editing.
-
-A remote endpoint marked **Erreichbar / Reachable** is not necessarily authenticated. A network probe must not be presented as proof that account tools work.
-
-GitHub can use the existing desktop token flow. Gmail, Google Drive and Google Calendar have official remote MCP endpoints, currently in **Developer Preview**. They require the documented Google Cloud project/API configuration and a user's own OAuth client. The gallery provides the endpoint, read-only scope suggestions and a handoff to Open WebUI's existing OAuth integration screen. Account consent is always performed by the user. No OAuth token or client secret is copied from another application.
-
-OAuth connections configured in Open WebUI remain managed there, outside the desktop registry. The desktop synchronization preserves such manually configured entries. Do not add unauthenticated OAuth endpoints as always-on desktop services: discovery success is not authorization.
-
-Official references (checked 2026-09-07):
-
-- [Google Workspace MCP setup](https://developers.google.com/workspace/guides/configure-mcp-servers)
-- [Google Developer Preview](https://developers.google.com/workspace/preview)
-- [GitHub remote MCP](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md)
-- [Open WebUI native MCP and OAuth](https://docs.openwebui.com/features/extensibility/mcp/)
-
-## Regression coverage
-
-`npm run test:ipc` includes workspace/chip/store regressions, preview HTTP/path/lifecycle tests, IPC authorization tests and catalog/editor-preservation tests. The isolated Electron browser regression additionally checks real CSS/modules/fonts, opaque-origin restrictions, blocked navigation and workspace replacement. The UI smoke harness uses synthetic connections and an isolated profile, never the user's live service configuration.
-
-### Verification on 2026-09-08
-
-- 160 regression tests passed. Typecheck, Svelte check, Vite build and shipped-script checks passed.
-- The original published ChatControls and FileNav run in an isolated Electron test with real fixture folders, in both a draft and a saved chat. Both directions of folder switching, placement beside Files, returning from Preview to Files and hiding unavailable previews passed.
-- The same test without the compatibility patch reproduces the old-directory defect.
-- The separate real Chromium sandbox/assets regression passed. New modules and targeted tests pass lint; unrelated legacy lint errors remain.
-- Computer Use also selected the second fixture folder and verified that `second.html` replaced `first.html`.
-
-Repeat the actual-upstream test with `OPEN_WEBUI_FRONTEND` pointing to the installed package's `frontend` directory and `node --experimental-strip-types --test tests/workspace-switch.browser.mts`. No installed package or personal workspaces are modified by that test. The release workflow obtains the pinned published frontend automatically.
-
-### Verification on 2026-09-07
-
-- Full regression suite: 155 tests passed; typecheck, Vite build and shipped-workspace checks passed.
-- Real Chromium isolation test passed under Node 22.22.1; this test is now included in the Windows-x64 release gate.
-- Computer Use in the visible isolated Electron window verified the connector catalog, Gmail setup guide, Escape dismissal without creating a connection, empty search results, actual HTML/CSS display, JavaScript clicks, mobile website width, switching A/B with the same `index.html` filename, missing-file error with the old frame removed, recovery and reload.
-- The first UI harness build omitted utility classes from components outside its Vite root. An explicit Tailwind source fixes this test-only issue; the corrected display was verified again visually.
-- Real Google account consent and authenticated Gmail operations were not tested: these require the user's own OAuth setup. No production accounts, chat database or service configuration were changed by these tests.
-- Existing Vite accessibility warnings in unrelated legacy components remain; the new connector dialog and targeted new/changed modules have a clean lint check.
-
-Repeat the manual test with `node tests/ui-smoke/launch.mjs`. Use `node --experimental-strip-types --test tests/workspace-preview.browser.mts` for the isolated browser regression.
+Provider sign-in is personal and is never bundled with the fork.

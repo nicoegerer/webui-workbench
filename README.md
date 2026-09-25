@@ -1,94 +1,87 @@
-# Open WebUI Desktop — Services Edition
+# WebUI Workbench
 
-[![Fork release](https://img.shields.io/github/v/release/nicoegerer/desktop?include_prereleases&label=services%20edition&color=%2331c48d)](https://github.com/nicoegerer/desktop/releases)
-[![Upstream](https://img.shields.io/badge/upstream-open--webui%2Fdesktop-6b7280)](https://github.com/open-webui/desktop)
-[![Discord](https://img.shields.io/discord/1170866489302188073?label=discord&color=%235865F2)](https://discord.gg/open-webui)
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+**An unofficial [Open WebUI Desktop](https://github.com/open-webui/desktop) fork — not a separate replacement for Open WebUI.**
 
-![Open WebUI Desktop](./demo.png)
+Optional connectors, local and GitHub workspaces, and website previews in the familiar Open WebUI interface. Open WebUI and its contributors provide the foundation; this repository documents and maintains the desktop additions. It is not affiliated with or endorsed by Open WebUI, GitHub, Garmin, or the connector providers.
 
-Your AI, right on your desktop. [Open WebUI](https://github.com/open-webui/open-webui) as a native app. Run models locally or connect to any server. No Docker, no terminal, no setup. Download, launch, chat.
+[Get started](docs/getting-started.md) · [Deutsch](README.de.md) · [Downloads](https://github.com/nicoegerer/webui-workbench/releases) · [What changed](docs/upstream-and-releases.md) · [Support](SUPPORT.md)
 
-This public fork adds a provider-neutral **Services & Connectors** registry for local processes, MCP
-servers through mcpo, and remote HTTP(S) tool endpoints. It ships with no personal connectors or
-credentials. See [Services and connectors](docs/services-and-connectors.md) and
-[the fork architecture](FORK_NOTES.md).
+## Start empty. Connect what you choose.
 
-> [!IMPORTANT]
-> Installers with the services feature are published on the
-> [fork releases page](https://github.com/nicoegerer/desktop/releases). The scheduled upstream sync
-> merges official Open WebUI Desktop changes and republishes them through the fork update feed, so
-> installed Services Edition builds keep the feature while receiving upstream improvements.
+A fresh installation has **no saved connections, MCP servers, provider accounts, API keys, model gateways, or selected workspaces**. GitHub, OmniRoute and Garmin are examples you can set up, not services everyone is required to use. Discover cards are templates, not active connections.
 
-> [!WARNING]
-> **Early Alpha.** Things move fast and stuff might break. [Report bugs](https://github.com/open-webui/desktop/issues) or [come hang out on Discord](https://discord.gg/open-webui).
+The connector manager, filesystem tools and preview features remain available. A connector becomes available to chats only after you deliberately add and enable it. Enabled desktop connectors are then available across chats; pause or remove them in the desktop's **Settings → Services & Connectors → Yours**.
 
-## Download
+## What this fork adds
 
-| Platform                    | Installer                                                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| macOS (Apple Silicon)       | [**Download .dmg**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-arm64.dmg)           |
-| macOS (Intel)               | [**Download .dmg**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-x64.dmg)             |
-| Windows x64                 | [**Download .exe**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-x64-setup.exe)       |
-| Windows ARM64               | [**Download .exe**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-arm64-setup.exe)     |
-| Linux x64 (AppImage)        | [**Download .AppImage**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_x64.AppImage)   |
-| Linux x64 (Debian/Ubuntu)   | [**Download .deb**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_amd64.deb)           |
-| Linux x64 (Snap)            | [**Download .snap**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_amd64.snap)         |
-| Linux x64 (Flatpak)         | [**Download .flatpak**](https://github.com/open-webui/desktop/releases/latest/download/open-webui.flatpak)         |
-| Linux ARM64 (AppImage)      | [**Download .AppImage**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_arm64.AppImage) |
-| Linux ARM64 (Debian/Ubuntu) | [**Download .deb**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_arm64.deb)           |
+| Capability | What you can do | Important boundary |
+| --- | --- | --- |
+| Services & Connectors | Manage optional local processes, local MCP adapters and remote MCP endpoints | You install/authenticate providers and choose which to enable |
+| Local workspaces | Select your real project folder; let a tool-capable model read, write and run commands | Commands run with your OS account's permissions, not in a sandbox |
+| GitHub workspaces | Browse repositories and read/write text files in a selected branch | Writes create commits; this is not a hosted shell or Codespace |
+| Website preview | View supported static sites and running local web apps beside the chat | Cloud source projects must contain a built static site; no cloud build service |
+| Update integration | Automatically test and merge official upstream changes, then build fork updates | Conflicts or failed checks stop publication and need maintenance |
 
-Internet required on first launch. After that, everything works offline. [All releases →](https://github.com/open-webui/desktop/releases)
+Chat, models, notes, voice features and the underlying web interface come from upstream. See the [change map and release policy](docs/upstream-and-releases.md) for the distinction and known limitations.
 
-## How It Works
+## Install
 
-🖥️ **Run locally.** The app runs Open WebUI on your machine. You can optionally enable the built-in llama.cpp engine to download and run models offline. Nothing leaves your computer.
+Use **this repository's [Releases page](https://github.com/nicoegerer/webui-workbench/releases)**, not the original desktop download page. Choose the asset for your OS and architecture:
 
-☁️ **Connect remotely.** Point the app at any Open WebUI server. Switch between multiple connections from the sidebar.
+- Windows: `webui-workbench-x64-setup.exe` or `webui-workbench-arm64-setup.exe`.
+- macOS: the matching `webui-workbench-…dmg` (Apple Silicon: arm64; Intel: x64).
+- Linux: the matching AppImage or deb. Other formats are available only when that release produced them.
 
-Use both at the same time.
+Until the first release finishes, use the source instructions below. Builds without configured signing credentials are unsigned; OS warnings do not constitute a security review. Verify the repository and release you intended to install.
 
-## Highlights
+This distribution has a separate application ID, profile directory and update feed. It does **not** automatically import your old Open WebUI Desktop chats or connections. Your previous installation remains separate. Avoid starting two local backends on the same port.
 
-- 🔗 **Services & Connectors.** Add arbitrary local commands, MCP servers, or remote tool endpoints without hardcoded provider accounts.
-- 💻 **Agentic workspaces.** Choose a local project folder, connect it through Open Terminal, and let tool-capable models edit files, use Git, and run builds or tests.
-- 🐙 **GitHub MCP preset.** Optionally configure GitHub's official MCP server with your own least-privilege token; nothing is connected by default.
-- ⚡ **Spotlight.** Hit `Shift+Cmd+I` (macOS) or `Shift+Ctrl+I` (Windows/Linux) to summon a floating chat bar over whatever you're doing. Drag to screenshot anything on screen.
-- 🎙️ **Voice input.** System-wide push-to-talk. Press the shortcut from any app to record, and your speech is transcribed and sent to your chat automatically.
-- 🧠 **Local inference.** Optionally run models entirely on your hardware via the built-in llama.cpp engine. Your data never leaves your machine.
-- 🎯 **One-click setup.** Launch and connect to a server in seconds. Local models can be enabled from the settings.
-- 🔌 **Multiple connections.** Juggle servers and switch between them instantly.
-- 🔄 **Auto-updates.** New releases land in the background.
-- 📡 **Offline-ready.** No internet needed after initial setup.
-- 💻 **Cross-platform.** macOS, Windows, and Linux.
+## First chat
 
-## System Requirements
+1. Launch the app and choose to install a local Open WebUI runtime or connect to your own instance.
+2. Configure a model provider in Open WebUI; a model subscription/key is not included.
+3. Send a simple chat message before adding optional tools.
+4. Add only the connectors you need. For local or cloud file work, select a workspace next to the message box.
 
-|          | Local Models                                       | Remote Only |
-| -------- | -------------------------------------------------- | ----------- |
-| **Disk** | 5 GB+                                              | ~500 MB     |
-| **RAM**  | 16 GB+                                             | 4 GB        |
-| **OS**   | macOS 12+, Windows 10+, modern Linux (glibc 2.28+) | Same        |
+[Complete first-run guide](docs/getting-started.md)
 
-> [!NOTE]
-> Local models need serious RAM (7B ≈ 8 GB, 13B ≈ 16 GB). Lighter machine? Connect to a remote server instead.
+## Optional setup guides
 
-## Privacy
+- [GitHub: CLI login or Personal Access Token](docs/integrations/github.md)
+- [OmniRoute: use it as a model gateway](docs/integrations/omniroute.md)
+- [Garmin: connect your own third-party MCP server](docs/integrations/garmin.md)
+- [Other local/remote MCP servers, including Google services](docs/services-and-connectors.md)
+- [Workspaces and website preview](docs/workspaces-and-preview.md)
 
-No telemetry. No tracking. No phone-home. Your conversations stay on your machine. Period.
+## Updates
 
-## Community
+Installed builds check this fork's feed, download available updates and install on normal quit; they do not force a restart. The local backend follows the runtime version tested with the desktop release when its automatic-update setting is enabled. No repeated source ZIP downloads are needed.
 
-- 💬 [Discord](https://discord.gg/open-webui) - Come hang out
-- 🐛 [Issues](https://github.com/open-webui/desktop/issues) - Report bugs or request features
-- 🌐 [Open WebUI](https://github.com/open-webui/open-webui) - The main project
-- 📖 [Docs](https://docs.openwebui.com) - Full documentation
+The repository checks official Desktop commits and stable Open WebUI runtime releases daily. Automatic merging is **not a guarantee that future incompatible changes can repair themselves**. See [how updates work](docs/upstream-and-releases.md).
 
-## Contributing
+## Data and permissions
 
-```bash
-npm install
+Remote models receive the content you send them, including tool results. Enabled connectors can access their configured accounts; local commands can affect your computer. This is not an offline-only product or a sandbox. Read [privacy and security](SECURITY.md) before granting access, importing a connector, or working with sensitive projects.
+
+## Build from source
+
+Requires Git, Node.js 22 and npm. Native dependencies also require your platform's build toolchain.
+
+```sh
+git clone https://github.com/nicoegerer/webui-workbench.git
+cd webui-workbench
+npm ci
+npm run test:ipc
+npm run build
 npm run dev
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release history. Licensed under [AGPL-3.0](LICENSE).
+See [contributing](CONTRIBUTING.md) for native build prerequisites, test suites and branch roles.
+
+## Attribution and license
+
+The desktop code is distributed under [AGPL-3.0](LICENSE), with upstream authorship and Git history retained. The separately installed [Open WebUI runtime has its own license and branding requirements](https://docs.openwebui.com/license/); those are not replaced by this repository's license. Embedded Open WebUI branding remains intact.
+
+This repository is a history-preserving copy rather than a GitHub fork-network entry, so GitHub may not display “forked from”. It remains explicitly an unofficial fork. [Provenance and modifications](docs/upstream-and-releases.md).
+
+Community-maintained software; no commercial support agreement, security certification or uptime guarantee is included.

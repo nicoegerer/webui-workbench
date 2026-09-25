@@ -108,7 +108,7 @@ test('a binary file is recognised so it can be refused', () => {
 })
 
 test('a GitHub workspace publishes scoped read/write OpenAPI tools Open WebUI loads', () => {
-  const schema = githubWorkspaceOpenApi('nicoegerer/test1') as {
+  const schema = githubWorkspaceOpenApi('example/first-project') as {
     info: { title: string }
     paths: Record<
       string,
@@ -122,7 +122,7 @@ test('a GitHub workspace publishes scoped read/write OpenAPI tools Open WebUI lo
     >
   }
 
-  assert.equal(schema.info.title, 'GitHub workspace: nicoegerer/test1')
+  assert.equal(schema.info.title, 'GitHub workspace: example/first-project')
   assert.equal(schema.paths['/files/list'].get.operationId, 'list_files')
   assert.equal(schema.paths['/files/read'].get.operationId, 'read_file')
   assert.equal(schema.paths['/files/write'].post.operationId, 'write_file')

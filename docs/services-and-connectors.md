@@ -1,209 +1,49 @@
-# Services and connectors
+# Services & Connectors
 
-Open WebUI Desktop Services Edition keeps tool-server launchers and endpoints in a local registry.
-Nothing is connected by default, so the same build is safe to distribute publicly.
+[Documentation home](../README.md)
 
-## Add a connector
+All connections are optional. A fresh profile contains an empty registry. Discover cards describe possibilities; they do not grant access or install personal accounts.
 
-Open **Settings → Services & Connectors → Add** and choose one of these adapters:
+## Choose the right kind of connection
 
-1. **MCP → OpenAPI** for a local MCP stdio executable. Enter the MCP executable, one argument per
-   line, and a free local port. The app launches `uvx --refresh --with mcp==1.9.4 mcpo ...` and
-   generates a per-service bearer key. You can also provide an existing key; it is encrypted with
-   the operating system credential store when available.
-2. **Local process** for any long-running command. A health-check URL is optional and restricted to
-   localhost.
-3. **Remote MCP** for an existing Streamable HTTP MCP server. An optional bearer token is stored
-   with the operating system's credential encryption when available.
+| You want to connect… | Where / how |
+| --- | --- |
+| An Open WebUI server | Desktop Connections |
+| An OpenAI-compatible model endpoint | Open WebUI administrator model Connections |
+| GitHub | [GitHub guide](integrations/github.md) |
+| Garmin through a local MCP server | [Garmin guide](integrations/garmin.md) |
+| A local stdio MCP server | Advanced add → MCP → OpenAPI |
+| An existing Streamable HTTP MCP endpoint | Remote MCP / custom remote connector |
+| A background executable such as OmniRoute | Advanced add → Local process |
 
-Click a service in the bottom status bar to open its logs in the same resizable panel used by Open
-WebUI, Open Terminal, and llama.cpp. Right-click a running local service to stop it.
+## Add and verify
 
-## Chat access to a connector
+1. Open the desktop **Settings → Services & Connectors**.
+2. Use **Discover** for templates or the advanced add options for your own service.
+3. Review the executable/URL, arguments, environment, working directory and permissions.
+4. Authenticate with the provider yourself, then save/connect.
+5. Check **Yours**, the service log, and one harmless read-only tool call.
 
-Starting a connector only launches the process. The bundled Open WebUI also has to know the
-endpoint, so the main process writes every MCP and remote connector into Open WebUI's
-`TOOL_SERVER_CONNECTIONS` through its admin API. mcpo connectors are registered as **OpenAPI**
-servers pointing at `openapi.json`; remote endpoints are registered as **MCP (Streamable HTTP)**
-servers with their bearer token.
+The managed Open WebUI account must be an administrator for automatic registration. Generic processes are not automatically tools. Enabled MCP/remote connectors are made available to all chats; they are hidden from duplicate per-chat controls to avoid misleading “off” switches. Control their access in **Yours**.
 
-Registration is retried with backoff while the server is still booting or nobody is signed in yet,
-and it repeats whenever the registry changes. Registered entries carry the id `desktop-<service-id>`.
-Connections added by hand in Open WebUI are never touched, and a connector removed from the desktop
-registry is removed from Open WebUI on the next sync. Disabling a connector clears its `enable` flag
-instead of deleting the entry, so bearer keys and filters survive a restart.
+Pausing preserves configuration but stops/disables access. Removing deletes that saved connection and its managed registration, not provider accounts or third-party installations. Workspace servers are created on deliberate selection and cleaned up when no longer needed; see [workspaces](workspaces-and-preview.md).
 
-The Open WebUI account must be an **admin**; tool-server configuration is an admin API. A non-admin
-session is reported in the desktop status toast and nothing is written.
+## Local MCP details
 
-### Always active, not in the tools menu
+The fork starts `uvx --refresh --with mcp==1.9.4 mcpo …` bound to loopback, with a generated bearer key, followed by your MCP executable and arguments. `uvx` or an explicit runner path is required. Commands are started with `shell: false`; arguments go one per line and must not rely on shell expansion.
 
-Open WebUI selects tools per conversation, so a registered connector would still start every chat
-switched off. Two things prevent that:
+Do not start a second process on an occupied port. A service is not adopted merely because an unrelated process is listening there. For an externally managed endpoint, configure that endpoint explicitly.
 
-- The connector tool ids are added to the signed-in user's default tool selection
-  (`settings.ui.tools`), which is what a chat falls back to when its model carries no tool list.
-- Every request to `/api/chat/completions` is rewritten in the page so it carries those ids, whether
-  or not anything is selected. See [Workspaces](#workspaces) for how that rewriting works.
+## Gmail, Drive, Calendar and other providers
 
-Because the connectors are always active, their rows are hidden from the chat's tools menu. The rows
-carry no identifying attribute, so they are matched by the connector name the desktop registered them
-under; if Open WebUI changes that markup the rows simply reappear and the connectors keep working.
+The catalog includes Google setup guidance, but a catalog entry is not a working signed-in account. You need an available MCP endpoint/adapter and the provider's authentication, project configuration and permissions. This fork does **not** provide a universal Google OAuth login flow or guarantee access to preview endpoints.
 
-## Workspaces
+For providers requiring an OAuth flow unsupported here, authenticate through a compatible adapter and connect its local stdio or authorized remote endpoint. Do not substitute an account password for a bearer token. Provider availability and terms can change independently of this fork.
 
-A workspace is chosen **per conversation**, from a chip next to the message box. The desktop status
-bar carries no workspace control.
+## Sharing configuration
 
-Open WebUI owns the chat interface, so the chip is added to the page from the outside: after the
-embedded page loads, the desktop injects a script into it. That script does two things.
+Export omits managed environment values and dedicated token/key fields. **It is not a general secret scrubber:** URLs, arguments, names and paths can still contain private data or embedded credentials. Review the complete file before sharing.
 
-- It patches `fetch` for `/api/chat/completions`. The workspace picked for that conversation, and the
-  connector tool ids, are written into the request body. The body is a far more stable contract than
-  the page's markup, so the behaviour does not depend on any DOM detail and cannot be undone by
-  Open WebUI's own menus.
-- It renders the chip and hides the connector rows. Both are cosmetic: if an anchor is not found, the
-  chat is left exactly as it was.
+Import presents the commands for confirmation before replacing the current registry. Treat an imported connector like executable code. It can run commands or contact remote services after you enable it.
 
-The selection is stored per chat id in the page's `localStorage`, so different conversations can work
-in different places at the same time. A conversation that has not been saved yet shares a `draft`
-slot and keeps its workspace once it gets an id.
-
-### Local
-
-Pick **Lokal → Ordner öffnen …** for a native folder dialog; any folder on the machine works, it does
-not have to be below a particular root. The desktop starts an Open Terminal instance for it, registers
-it as a terminal server named after the folder with a stable id of `desktop-ws-<hash>`, and the chip
-stores that id for the conversation. The same instance is registered as a hidden OpenAPI tool server.
-Every request from that chat carries both `terminal_id` and the matching workspace tool id, so a
-tool-capable model can create and edit files, run commands, use Git, install dependencies, and execute
-builds and tests there even when Open WebUI omits its special terminal tools for that model.
-
-Several active folders can be open at once — one terminal each. Reopening a conversation restores
-its selection and starts its workspace on demand.
-
-### Cloud
-
-Pick **Cloud** for a list of the repositories the GitHub connector's token can reach. Selecting one
-makes it the workspace for that conversation **without a checkout**: nothing is cloned.
-
-The mount provides list/read/write file tools scoped to that repository and branch, plus the
-terminal-shaped browsing API used by Open WebUI's Files panel. Each chat request selects this
-toolset ahead of large connector catalogs, so its file tools survive provider tool-count limits.
-The terminal ID selects the file pane, not a shell: cloud mounts cannot execute local commands.
-
-Saving a text file (up to 1 MB UTF-8) creates a GitHub commit in the selected branch. The tool
-reads the current blob revision, serializes writes on the branch and verifies the committed bytes
-before reporting success. It invalidates the file-list cache after writes. The connector's token
-needs **Contents: read and write** for that repository; branch protections remain in effect.
-No local copy is created, no force push is used, and permission/conflict errors are shown explicitly.
-
-Switching workspace mid-conversation replaces that instruction rather than stacking a second one,
-and switching back to a local folder removes it.
-
-### Lifetime
-
-A workspace is started when a conversation asks for one, never on launch. Open Terminal runs with
-the folder as its working directory, so a folder left open would keep a handle on it and could not be
-deleted or moved. The chat retains the current/pending workspace, recently submitted requests and
-active background answers. Inactive historical selections remain saved, but do not keep a process
-or repository mount registered forever. Unknown activity states are retained conservatively.
-
-The desktop additionally checks for running commands and live PTYs before stopping a process.
-An explicitly configured startup Open Terminal service is protected. Reopening a saved selection
-restarts the workspace, waiting for any shutdown already in progress.
-
-Desktop-managed terminal/tool entries are hidden in Open WebUI's duplicate integration controls;
-use **Services & Connectors** to manage them. Needed connectors such as Garmin remain available
-to every chat. User-owned entries, including id-less local servers, are preserved.
-
-A workspace picked before the first message is carried over when the conversation gets its id, so it
-is not lost the moment it is used.
-
-## GitHub MCP preset
-
-### Existing GitHub CLI login
-
-The GitHub connector now has an explicit **GitHub access → Existing GitHub CLI login** option.
-It is opt-in, never enabled merely because `gh` is installed. It uses the active `github.com`
-CLI account without exporting, copying or storing its token in Open WebUI. Install GitHub CLI
-and sign in with `gh auth login` yourself before selecting this mode. A failed login does not
-silently fall back to the connector's saved token or another account.
-
-This mode exposes two compact, always-on read tools ahead of large catalogs such as Garmin:
-`github_api_read` for REST API status (repositories, permissions, Actions runs/jobs, Pages,
-issues, pull requests and releases), and `github_actions_logs` for actual paginated log text.
-The Cloud picker, verified file writer and static preview use the same CLI account. File writes
-remain scoped to the selected repository/branch. No local shell or checkout is exposed.
-
-This is **not an unrestricted GitHub administration interface**. The selected Cloud workspace
-additionally exposes `github_workspace_action`: enable Pages for Actions, dispatch an existing
-workflow on the selected branch, or rerun a completed run belonging to that branch (not a fork).
-These operations require an explicit request in the current chat and can publish a website.
-Repository/branch overrides, repository deletion and account-permission changes are not supported.
-Existing legacy Pages publishing sources are preserved, not silently switched. No operation is
-performed merely by selecting a workspace. Dispatch acceptance is not deployment success: inspect
-the run and logs afterwards. Uncertain requests are not retried automatically.
-
-Disabling/removing the connector closes its loopback bridge and revokes cached workspace reads.
-Switching back to Token mode preserves the previously encrypted token and restores the official
-MCP connector. The shipped default remains Token mode; account access is never bundled in releases.
-
-Choose **Add → GitHub MCP** for an optional template based on GitHub's official MCP server. The
-template uses the official hosted endpoint at `https://api.githubcopilot.com/mcp/`, does not require
-Docker, and does not contain an account or token. The user must enter a fine-grained Personal Access
-Token with only the repository permissions needed for the intended tasks. The token is required for
-this preset, not optional. It is encrypted locally and excluded from registry exports.
-
-After saving, the connector is registered in the bundled Open WebUI automatically and becomes part
-of the default tool selection, so a chat can use it straight away. A blue **reachable** status in the
-desktop registry only confirms that the remote endpoint answered.
-
-The same token backs the **Cloud** mode of the workspace picker, so one connection covers repository
-APIs and cloud workspaces alike.
-
-GitHub MCP handles the GitHub side — repositories, issues, pull requests, and commits without a
-checkout. A local workspace handles files, shell, Git CLI, builds, and tests on this machine. Pick
-cloud mode for changes that can be committed directly, and a local workspace when the task needs a
-working tree, a build, or a test run.
-
-## Windows and `uvx`
-
-Use `uvx` as the runner unless a specific installation must be selected. At launch the app checks:
-
-- every directory in `PATH`;
-- `%USERPROFILE%\.local\bin`;
-- the WinGet links directory; and
-- installed Python `Scripts` directories below `%LOCALAPPDATA%\Programs\Python`.
-
-An absolute runner path remains available as an override. Commands are launched directly with
-`shell: false`.
-
-## mcpo authentication
-
-After saving an MCP connector, the connection dialog shows the URL and its bearer key. In Open
-WebUI, select **Bearer** authentication and paste only the key value, without adding the `Bearer `
-prefix. Replace an older stored key completely; a mismatched key is rejected by mcpo with
-`403 Invalid API key`.
-
-A managed MCP connector never adopts an unrelated process that is already listening on its port,
-because the app cannot safely verify that process's key. Stop a manually started mcpo instance or
-choose another port. To keep using an externally managed instance, add it as a **Remote endpoint**
-with its existing bearer token instead.
-
-## Provider integrations
-
-GitHub, Gmail, Google Calendar, Garmin, and similar products need an MCP/tool-server implementation
-or a hosted adapter. The desktop registry manages that adapter; it does not claim to implement each
-provider's OAuth flow. This separation lets providers be added without hardcoding personal accounts
-or credentials into the public application.
-
-The GitHub item is a selectable template, not a configured default. Garmin MCP and OmniRoute are
-also never created on a fresh installation. Only an explicitly enabled legacy OmniRoute preference
-is migrated for an existing user.
-
-## Sharing registry files
-
-Exported JSON is suitable for templates and team sharing. It includes commands and endpoints, but
-never environment values, generated mcpo bearer keys, or remote access tokens. Import always shows
-the commands for confirmation before replacing the current registry.
+Read [privacy and security](../SECURITY.md) before enabling tools.
