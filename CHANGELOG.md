@@ -1,5 +1,10 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [0.0.20-workbench.1] - 2026-09-25
 
 ### Changed
@@ -9,11 +14,6 @@
 - Isolated the application ID, profile directory and update feed from existing Open WebUI Desktop installations. No automatic account/chat migration.
 - Reworked public documentation with GitHub, OmniRoute, Garmin, workspaces, privacy/security and contribution guides; corrected fork download/support links.
 - Kept daily tested upstream integration and unattended releases, with Workbench versioning and regression checks for neutral defaults.
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.0.20-services.38] - 2026-09-24
 

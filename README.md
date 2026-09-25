@@ -32,7 +32,7 @@ Use **this repository's [Releases page](https://github.com/nicoegerer/webui-work
 - macOS: the matching `webui-workbench-…dmg` (Apple Silicon: arm64; Intel: x64).
 - Linux: the matching AppImage or deb. Other formats are available only when that release produced them.
 
-Until the first release finishes, use the source instructions below. Builds without configured signing credentials are unsigned; OS warnings do not constitute a security review. Verify the repository and release you intended to install.
+Releases use the `workbench` prerelease channel. Builds without configured signing credentials are unsigned; OS warnings do not constitute a security review. Verify the repository and release you intended to install.
 
 This distribution has a separate application ID, profile directory and update feed. It does **not** automatically import your old Open WebUI Desktop chats or connections. Your previous installation remains separate. Avoid starting two local backends on the same port.
 
