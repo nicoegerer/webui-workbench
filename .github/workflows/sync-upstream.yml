@@ -55,7 +55,8 @@ jobs:
           node .github/scripts/prepare-upstream-sync.mjs "$BACKEND_TAG"
 
       - name: Verify candidate before publishing any branch
-        if: steps.candidate.outputs.changed == 'true'
+        # Also verify one-time setup changes even if upstream has no new commit.
+        if: steps.candidate.outputs.changed == 'true' || github.event_name == 'push'
         run: |
           npm ci
           npm run test:ipc
