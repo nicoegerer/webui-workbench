@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-09-29
+
+### Community fork
+
+- Initial release of WebUI Workbench, a community-maintained fork of Open WebUI Desktop. Upstream authorship, history, AGPL-3.0 license and embedded branding are preserved.
+- Dedicated application ID, user profile and update feed. This community distribution is not endorsed by Open WebUI.
+
+### Included desktop additions
+
+- Optional local processes, local stdio MCP adapters and remote MCP connectors. Fresh profiles contain no preconfigured connections or accounts; users choose and authenticate their own providers.
+- Per-chat local workspaces using real project paths, explicit Open Terminal lifecycle ownership, scoped filesystem tools and safeguards against stale workspace selection.
+- GitHub workspaces with optional CLI authentication or a saved connector token, repository file reads and commit writes, and permission-aware workflow/Pages tools.
+- Conditional website-preview tabs with isolated rendering for supported local and GitHub static sites. Cloud workspaces are not hosted terminals or build services.
+- Tested Open WebUI 0.11.4 and Open Terminal 0.11.34, language-code compatibility, and daily gated upstream integration with automatic fork releases and desktop updates.
+
+### Documentation and verification
+
+- General connection guides in English and German, a workspace guide, and documented security boundaries and platform constraints.
+- Verified documentation links, unit/regression tests, production compilation and the six-platform release pipeline.
+
 ## [0.0.20] - 2026-05-07
 
 ### Fixed

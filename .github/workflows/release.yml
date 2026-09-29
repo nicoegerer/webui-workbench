@@ -4,6 +4,11 @@ on:
     push:
         branches:
             - release
+    workflow_dispatch:
+
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
     compile:
@@ -21,6 +26,16 @@ jobs:
 
             - name: Install Dependencies
               run: npm ci
+
+            - name: Test IPC Serialization
+              run: npm run test:ipc
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Verify release runtime contract
+              run: python .github/scripts/check-runtime-contract.py
 
             - name: Typecheck and Build
               run: npm run build
@@ -44,7 +59,7 @@ jobs:
                       arch: x64
                     - os: ubuntu-24.04-arm
                       arch: arm64
-                    - os: windows-latest
+                    - os: windows-2022
                       arch: x64
                     - os: windows-11-arm
                       arch: arm64
@@ -64,6 +79,40 @@ jobs:
 
             - name: Install Dependencies
               run: npm ci
+
+            - name: Setup Python for Windows HTTP regression
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Test installed Windows filesystem HTTP routes
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              timeout-minutes: 15
+              shell: pwsh
+              run: |
+                  $terminalVersion = (Get-Content -Raw src/shared/runtime-versions.json | ConvertFrom-Json).openTerminal
+                  python -m pip install --disable-pip-version-check "open-terminal==$terminalVersion"
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  python -B tests/test_workspace_write_guard.py --real --real-http -v
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            - name: Test isolated website preview in Chromium
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              timeout-minutes: 10
+              shell: pwsh
+              run: node --experimental-strip-types --test tests/workspace-preview.browser.mts
+
+            - name: Test shipped workspace switching and conditional preview tabs
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              timeout-minutes: 15
+              shell: pwsh
+              run: |
+                  $env:OPEN_WEBUI_FRONTEND = Join-Path $env:RUNNER_TEMP 'workspace-frontend'
+                  python .github/scripts/check-runtime-contract.py --frontend-output $env:OPEN_WEBUI_FRONTEND
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  node --experimental-strip-types --test tests/workspace-switch.browser.mts tests/settings-locales.browser.mts
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
             - name: Download Compiled Output
               uses: actions/download-artifact@v4
@@ -202,10 +251,10 @@ jobs:
         name: Create GitHub Release
         needs: package
         if: >-
-            github.event_name == 'push' &&
+            (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
             github.ref == 'refs/heads/release' &&
             !cancelled() &&
-            needs.package.result != 'failure'
+            needs.package.result == 'success'
         runs-on: ubuntu-latest
         permissions:
             contents: write
@@ -216,6 +265,7 @@ jobs:
                   sparse-checkout: |
                       package.json
                       CHANGELOG.md
+                      .github/scripts/prepare-release-assets.mjs
                   sparse-checkout-cone-mode: false
 
             - name: Get version from package.json
@@ -246,179 +296,23 @@ jobs:
                   pattern: '*-*'
                   merge-multiple: false
 
-            - name: Install js-yaml for manifest merging
-              run: npm install --no-save js-yaml
-
-            - name: Merge macOS latest-mac.yml (x64 + arm64)
+            - name: Install release manifest dependency
               run: |
-                  # Each macOS arch build produces its own latest-mac.yml with only
-                  # that arch's entry. Merge them so electron-updater works for both.
-                  X64_YML="macos-latest-x64/latest-mac.yml"
-                  ARM_YML="macos-latest-arm64/latest-mac.yml"
+                  RELEASE_YAML_VERSION=$(node -p "require('./package.json').devDependencies['js-yaml']")
+                  npm install --no-save --ignore-scripts "js-yaml@$RELEASE_YAML_VERSION"
 
-                  if [ -f "$X64_YML" ] && [ -f "$ARM_YML" ]; then
-                    echo "Merging latest-mac.yml from both architectures"
-                    node -e "
-                      const fs = require('fs');
-                      const yaml = require('js-yaml');
-                      const x64 = yaml.load(fs.readFileSync('$X64_YML', 'utf8'));
-                      const arm = yaml.load(fs.readFileSync('$ARM_YML', 'utf8'));
-                      const all = [...(x64.files || []), ...(arm.files || [])];
-                      const map = new Map();
-                      for (const f of all) map.set(f.url, f);
-                      x64.files = [...map.values()];
-                      const out = yaml.dump(x64, { lineWidth: -1 });
-                      fs.writeFileSync('$X64_YML', out);
-                      console.log(out);
-                    "
-                    rm -f "$ARM_YML"
-                  else
-                    echo "Skipping merge — need both $X64_YML and $ARM_YML"
-                    ls -la macos-latest-*/latest-mac.yml 2>/dev/null || true
-                  fi
-
-            - name: Merge Linux latest-linux.yml (x64 + arm64)
-              run: |
-                  X64_YML="ubuntu-latest-x64/latest-linux.yml"
-                  # electron-builder names the arm64 Linux manifest "latest-linux-arm64.yml"
-                  ARM_YML="ubuntu-24.04-arm-arm64/latest-linux-arm64.yml"
-
-                  if [ -f "$X64_YML" ] && [ -f "$ARM_YML" ]; then
-                    echo "Merging latest-linux.yml from both architectures"
-                    node -e "
-                      const fs = require('fs');
-                      const yaml = require('js-yaml');
-                      const x64 = yaml.load(fs.readFileSync('$X64_YML', 'utf8'));
-                      const arm = yaml.load(fs.readFileSync('$ARM_YML', 'utf8'));
-                      const all = [...(x64.files || []), ...(arm.files || [])];
-                      const map = new Map();
-                      for (const f of all) map.set(f.url, f);
-                      x64.files = [...map.values()];
-                      const out = yaml.dump(x64, { lineWidth: -1 });
-                      fs.writeFileSync('$X64_YML', out);
-                      console.log(out);
-                    "
-                    rm -f "$ARM_YML"
-                  else
-                    echo "Skipping merge — need both $X64_YML and $ARM_YML"
-                    ls -la ubuntu-*-*/latest-linux*.yml 2>/dev/null || true
-                  fi
-
-            - name: Merge Windows latest.yml (x64 + arm64)
-              run: |
-                  X64_YML="windows-latest-x64/latest.yml"
-                  ARM_YML="windows-11-arm-arm64/latest.yml"
-
-                  if [ -f "$X64_YML" ] && [ -f "$ARM_YML" ]; then
-                    echo "Merging latest.yml from both architectures"
-                    node -e "
-                      const fs = require('fs');
-                      const yaml = require('js-yaml');
-                      const x64 = yaml.load(fs.readFileSync('$X64_YML', 'utf8'));
-                      const arm = yaml.load(fs.readFileSync('$ARM_YML', 'utf8'));
-                      const all = [...(x64.files || []), ...(arm.files || [])];
-                      const map = new Map();
-                      for (const f of all) map.set(f.url, f);
-                      x64.files = [...map.values()];
-                      const out = yaml.dump(x64, { lineWidth: -1 });
-                      fs.writeFileSync('$X64_YML', out);
-                      console.log(out);
-                    "
-                    rm -f "$ARM_YML"
-                  else
-                    echo "Skipping merge — need both $X64_YML and $ARM_YML"
-                    ls -la windows-*-*/latest.yml 2>/dev/null || true
-                  fi
-
-            - name: Reconcile update manifest hashes
-              run: |
-                  # Recompute SHA512 from actual artifact files to ensure manifests
-                  # match the real binaries (fixes signed/unsigned hash mismatches)
-                  node -e "
-                    const fs = require('fs');
-                    const crypto = require('crypto');
-                    const yaml = require('js-yaml');
-                    const path = require('path');
-
-                    const manifests = [
-                      { prefix: 'macos-latest-', file: 'latest-mac.yml' },
-                      { prefix: 'ubuntu-',        file: 'latest-linux.yml' },
-                      { prefix: 'windows-',       file: 'latest.yml' },
-                    ];
-
-                    const allDirs = fs.readdirSync('.').filter(d => {
-                      try { return fs.statSync(d).isDirectory(); } catch { return false; }
-                    });
-
-                    for (const { prefix, file } of manifests) {
-                      const dirs = allDirs.filter(d => d.startsWith(prefix));
-                      let ymlPath = null;
-                      for (const dir of dirs) {
-                        const p = path.join(dir, file);
-                        if (fs.existsSync(p)) { ymlPath = p; break; }
-                      }
-                      if (!ymlPath) { console.log('No ' + file + ' found, skipping'); continue; }
-
-                      const manifest = yaml.load(fs.readFileSync(ymlPath, 'utf8'));
-                      let fixed = 0;
-
-                      for (const entry of manifest.files) {
-                        for (const dir of dirs) {
-                          const filePath = path.join(dir, entry.url);
-                          if (fs.existsSync(filePath)) {
-                            const buf = fs.readFileSync(filePath);
-                            const hash = crypto.createHash('sha512').update(buf).digest('base64');
-                            if (hash !== entry.sha512) {
-                              console.log('[' + file + '] Fix: ' + entry.url);
-                              entry.sha512 = hash;
-                              entry.size = buf.length;
-                              fixed++;
-                            }
-                            break;
-                          }
-                        }
-                      }
-
-                      if (manifest.path) {
-                        for (const dir of dirs) {
-                          const filePath = path.join(dir, manifest.path);
-                          if (fs.existsSync(filePath)) {
-                            const buf = fs.readFileSync(filePath);
-                            manifest.sha512 = crypto.createHash('sha512').update(buf).digest('base64');
-                            break;
-                          }
-                        }
-                      }
-
-                      const out = yaml.dump(manifest, { lineWidth: -1 });
-                      fs.writeFileSync(ymlPath, out);
-                      console.log('[' + file + '] ' + (fixed ? 'Fixed ' + fixed + ' entries' : 'All hashes OK'));
-                    }
-                  "
+            - name: Stage unique release assets and reconcile update manifests
+              run: node .github/scripts/prepare-release-assets.mjs
 
             - name: Create Release
-              uses: softprops/action-gh-release@v2
+              uses: softprops/action-gh-release@v3
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
                   tag_name: v${{ steps.version.outputs.version }}
+                  target_commitish: ${{ github.sha }}
                   name: v${{ steps.version.outputs.version }}
                   body_path: /tmp/release_notes.md
                   draft: false
-                  prerelease: false
-                  files: |
-                      windows-*-*/*.exe
-                      windows-*-*/*.blockmap
-                      windows-*-*/latest*.yml
-                      macos-latest-*/*.dmg
-                      macos-latest-*/*.zip
-                      macos-latest-*/*.pkg
-                      macos-latest-*/*.blockmap
-                      macos-latest-*/latest*.yml
-                      ubuntu-*-*/*.deb
-                      ubuntu-*-*/*.rpm
-                      ubuntu-*-*/*.AppImage
-                      ubuntu-*-*/*.snap
-                      ubuntu-*-*/*.flatpak
-                      ubuntu-*-*/*.tar.gz
-                      ubuntu-*-*/latest*.yml
+                  prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+                  files: release-assets/*

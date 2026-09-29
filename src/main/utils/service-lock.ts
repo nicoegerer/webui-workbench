@@ -1,18 +1,7 @@
 // @ts-nocheck
 
-/**
- * ServiceLock — reusable singleton lock for managed child processes.
- *
- * In Node.js, the synchronous check-and-set before any `await` is atomic
- * (event loop guarantees no interleaving). This class makes that pattern
- * explicit and self-documenting.
- *
- * Usage:
- *   const lock = new ServiceLock('my-service')
- *   if (!lock.acquire()) return existingResult
- *   try { ... } catch { lock.release() }
- *   // release in stop(), not in start()
- */
+/** Synchronous check-and-set before any await prevents concurrent service starts.
+* Release on stop or failure, not after a successful start. */
 
 import log from 'electron-log'
 
@@ -24,10 +13,7 @@ export class ServiceLock {
     this.name = name
   }
 
-  /**
-   * Try to acquire the lock. Returns false if already locked.
-   * This is synchronous — no interleaving possible in Node.js event loop.
-   */
+  /** Atomic within the event loop; false means another start already owns the lock. */
   acquire(): boolean {
     if (this.locked) {
       log.info(`[${this.name}] Lock held — rejecting duplicate start`)
@@ -37,25 +23,15 @@ export class ServiceLock {
     return true
   }
 
-  /**
-   * Release the lock. Called in stop() or on failure.
-   */
   release(): void {
     this.locked = false
   }
 
-  /**
-   * Check if the lock is currently held.
-   */
   isLocked(): boolean {
     return this.locked
   }
 }
 
-/**
- * Validate whether a PID is still alive.
- * Returns true if the process exists, false if it's gone.
- */
 export const isProcessAlive = (pid: number | null): boolean => {
   if (!pid) return false
   try {

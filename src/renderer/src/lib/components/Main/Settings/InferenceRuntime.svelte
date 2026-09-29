@@ -212,7 +212,6 @@
     </button>
   </div>
 
-  <!-- Version -->
   <div class="py-4 flex items-center justify-between border-t border-white/[0.04]">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.inference.version')}</div>
@@ -226,7 +225,6 @@
     />
   </div>
 
-  <!-- Variant -->
   <div class="py-4 flex items-center justify-between border-t border-white/[0.04]">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.inference.variant')}</div>
@@ -243,7 +241,6 @@
   </div>
 {:else}
 <div class="flex flex-col divide-y divide-white/[0.04]">
-  <!-- Server status & controls -->
   <div class="py-4">
     <div class="flex items-center justify-between mb-3">
       <div>
@@ -344,7 +341,6 @@
     </div>
   </div>
 
-  <!-- Running Instance Info -->
   {#if isRunning && lsInfo}
     <div class="py-4">
       <div class="text-[13px] opacity-70 mb-3">{$i18n.t('settings.inference.runningInstance')}</div>
@@ -367,7 +363,6 @@
     </div>
   {/if}
 
-  <!-- Update Section -->
   <div class="py-4">
     <div class="flex items-center justify-between">
       <div>
@@ -421,7 +416,6 @@
     </div>
   </div>
 
-  <!-- Start on Launch -->
   <div class="py-4 flex items-center justify-between">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.inference.startOnLaunch')}</div>
@@ -433,7 +427,6 @@
     />
   </div>
 
-  <!-- Version -->
   <div class="py-4 flex items-center justify-between">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.inference.version')}</div>
@@ -447,7 +440,6 @@
     />
   </div>
 
-  <!-- Variant -->
   <div class="py-4 flex items-center justify-between">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.inference.variant')}</div>
@@ -463,7 +455,6 @@
     </select>
   </div>
 
-  <!-- Port -->
   <div class="py-4 flex items-center justify-between">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.inference.port')}</div>
@@ -477,7 +468,6 @@
     />
   </div>
 
-  <!-- Extra Arguments -->
   <div class="py-4 flex items-center justify-between gap-4">
     <div class="shrink-0">
       <div class="text-[13px] opacity-70">{$i18n.t('settings.inference.extraArguments')}</div>
@@ -495,7 +485,6 @@
     />
   </div>
 
-  <!-- Uninstall -->
   {#if lsInfo?.binaryPath}
   <div class="py-4 flex items-center justify-between">
     <div>

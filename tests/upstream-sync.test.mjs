@@ -1,0 +1,387 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type -- Plain JavaScript git fixtures. */
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve, dirname, basename } from 'node:path'
+import { runInNewContext } from 'node:vm'
+import {
+  prepareSync,
+  nextForkVersion,
+  mergeForkManifest,
+  mergeChangelogAdditions
+} from '../.github/scripts/prepare-upstream-sync.mjs'
+import { keepSyncActive } from '../.github/scripts/keep-sync-active.mjs'
+
+const fixture = (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'desktop-sync-test-'))
+  t.after(() => {
+    assert.equal(dirname(resolve(cwd)), resolve(tmpdir()))
+    assert.ok(basename(cwd).startsWith('desktop-sync-test-'))
+    rmSync(cwd, { recursive: true, force: true })
+  })
+  const git = (...args) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const write = (file, data) => {
+    mkdirSync(dirname(join(cwd, file)), { recursive: true })
+    writeFileSync(join(cwd, file), typeof data === 'string' ? data : JSON.stringify(data) + '\n')
+  }
+  const commit = (message) => {
+    git('add', '.')
+    git('commit', '-m', message)
+    return git('rev-parse', 'HEAD')
+  }
+  git('init', '-b', 'main')
+  git('config', 'user.name', 'Sync fixture')
+  git('config', 'user.email', 'fixture@example.invalid')
+  git('config', 'core.autocrlf', 'false')
+  write('package.json', { name: 'fixture', version: '0.0.20' })
+  write('package-lock.json', { version: '0.0.20', packages: { '': { version: '0.0.20' } } })
+  write('CHANGELOG.md', '# Changelog\n\n## [0.0.20]\n\nOfficial release\n')
+  write('shared.txt', 'original\n')
+  const upstream = commit('upstream')
+  for (const ref of ['origin/main', 'upstream/main'])
+    git('update-ref', `refs/remotes/${ref}`, upstream)
+  git('checkout', '-b', 'release')
+  write('package.json', { name: 'fixture', version: '0.1.0' })
+  write('src/shared/runtime-versions.json', { openWebUI: '0.11.1', openTerminal: '0.11.34' })
+  const feature = commit('feature')
+  git('update-ref', 'refs/remotes/origin/managed-services', feature)
+  write('release-only-fix.txt', 'must survive\n')
+  commit('release-only fix')
+  return { cwd, git, write, commit, upstream }
+}
+
+test('backend-only update produces one release and preserves release-only fixes', (t) => {
+  const f = fixture(t)
+  assert.deepEqual(prepareSync(f.cwd, 'v0.11.3'), {
+    changed: true,
+    version: '0.1.1',
+    backend: '0.11.3'
+  })
+  assert.equal(readFileSync(join(f.cwd, 'release-only-fix.txt'), 'utf8'), 'must survive\n')
+  assert.equal(
+    JSON.parse(readFileSync(join(f.cwd, 'package-lock.json'))).packages[''].version,
+    '0.1.1'
+  )
+  assert.equal(
+    prepareSync(f.cwd, 'v0.11.3').changed,
+    false,
+    'same upstream must not release forever'
+  )
+  assert.equal(prepareSync(f.cwd, 'v0.11.2').changed, false, 'no runtime downgrade')
+})
+
+test('upstream-only update merges all official changes and keeps fork fixes', (t) => {
+  const f = fixture(t)
+  f.git('checkout', 'main')
+  f.write('official-new.txt', 'upstream change\n')
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('new upstream'))
+  f.git('checkout', 'release')
+  assert.equal(prepareSync(f.cwd, 'v0.11.1').version, '0.1.1')
+  assert.ok(readFileSync(join(f.cwd, 'official-new.txt'), 'utf8').includes('upstream'))
+  f.git('merge-base', '--is-ancestor', 'upstream/main', 'HEAD')
+  f.git('merge-base', '--is-ancestor', 'origin/managed-services', 'HEAD')
+})
+
+test('the Workbench distribution keeps its identity through an automatic runtime update', (t) => {
+  const f = fixture(t)
+  f.write('package.json', { name: 'webui-workbench', version: '0.1.0' })
+  f.write('package-lock.json', {
+    name: 'webui-workbench',
+    version: '0.1.0',
+    packages: { '': { name: 'webui-workbench', version: '0.1.0' } }
+  })
+  f.commit('public fork identity')
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').version, '0.1.1')
+  const pkg = JSON.parse(readFileSync(join(f.cwd, 'package.json')))
+  const lock = JSON.parse(readFileSync(join(f.cwd, 'package-lock.json')))
+  assert.equal(pkg.name, 'webui-workbench')
+  assert.equal(lock.packages[''].name, pkg.name)
+  assert.equal(lock.packages[''].version, pkg.version)
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').changed, false)
+})
+
+test('official Desktop version bumps preserve fork identity and both dependency additions', (t) => {
+  const f = fixture(t)
+  const originalChangelog = readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8')
+  f.write('package.json', {
+    name: 'webui-workbench',
+    version: '0.1.1',
+    dependencies: { 'fork-tool': '1.0.0' }
+  })
+  f.write('package-lock.json', {
+    name: 'webui-workbench',
+    version: '0.1.1',
+    packages: {
+      '': {
+        name: 'webui-workbench',
+        version: '0.1.1',
+        dependencies: { 'fork-tool': '1.0.0' }
+      },
+      'node_modules/fork-tool': { version: '1.0.0' }
+    }
+  })
+  f.write('CHANGELOG.md', originalChangelog.replace('\n## [', '\n## [0.1.1]\n\nFork notes\n\n## ['))
+  f.commit('fork identity and dependency')
+  f.git('checkout', 'main')
+  f.write('package.json', {
+    name: 'fixture',
+    version: '0.0.21',
+    dependencies: { 'official-tool': '2.0.0' }
+  })
+  f.write('package-lock.json', {
+    name: 'fixture',
+    version: '0.0.21',
+    packages: {
+      '': { name: 'fixture', version: '0.0.21', dependencies: { 'official-tool': '2.0.0' } },
+      'node_modules/official-tool': { version: '2.0.0' }
+    }
+  })
+  f.write(
+    'CHANGELOG.md',
+    originalChangelog.replace('\n## [', '\n## [0.0.21]\n\nNew official release\n\n## [')
+  )
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('official version and dependency'))
+  f.git('checkout', 'release')
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').version, '0.1.2')
+  const pkg = JSON.parse(readFileSync(join(f.cwd, 'package.json')))
+  const lock = JSON.parse(readFileSync(join(f.cwd, 'package-lock.json')))
+  assert.equal(pkg.name, 'webui-workbench')
+  assert.deepEqual(pkg.dependencies, { 'fork-tool': '1.0.0', 'official-tool': '2.0.0' })
+  assert.equal(lock.name, pkg.name)
+  assert.equal(lock.packages[''].name, pkg.name)
+  assert.equal(lock.packages[''].version, pkg.version)
+  assert.ok(lock.packages['node_modules/fork-tool'])
+  assert.ok(lock.packages['node_modules/official-tool'])
+  const changelog = readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8')
+  for (const heading of ['0.1.2', '0.1.1', '0.0.21', '0.0.20']) {
+    assert.equal(changelog.split(`## [${heading}]`).length, 2)
+  }
+  f.git('merge-base', '--is-ancestor', 'upstream/main', 'HEAD')
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').changed, false)
+})
+
+test('manifest reconciliation keeps deletions and never chooses a conflicting dependency silently', () => {
+  assert.deepEqual(
+    mergeForkManifest(
+      'package.json',
+      { dependencies: { removed: '1', shared: '1' } },
+      { dependencies: { shared: '1' } },
+      { dependencies: { removed: '1', shared: '2' } }
+    ),
+    { dependencies: { shared: '2' } }
+  )
+  for (const [base, ours, theirs] of [
+    [
+      { dependencies: { shared: '1' } },
+      { dependencies: { shared: '2' } },
+      { dependencies: { shared: '3' } }
+    ],
+    [{ dependencies: { shared: '1' } }, { dependencies: {} }, { dependencies: { shared: '3' } }],
+    [{ files: ['base'] }, { files: ['fork'] }, { files: ['official'] }]
+  ]) {
+    assert.throws(() => mergeForkManifest('package.json', base, ours, theirs), /Unresolved/)
+  }
+  assert.throws(() => mergeForkManifest('arbitrary.json', {}, {}, {}), /Only object-shaped/)
+  const prototypeKey = JSON.parse('{"__proto__":{"retained":true}}')
+  const merged = mergeForkManifest('package.json', {}, prototypeKey, { extra: true })
+  assert.ok(Object.hasOwn(merged, '__proto__'))
+  assert.equal(Object.getPrototypeOf(merged), Object.prototype)
+  assert.equal({}.retained, undefined)
+})
+
+test('changelog reconciliation refuses edited history or overlapping new version notes', () => {
+  const base = '# Changelog\n\n## [1.0.0]\n\nOriginal\n'
+  const ours = base.replace('\n## [', '\n## [1.1.0]\n\nFork\n\n## [')
+  const theirs = base.replace('\n## [', '\n## [1.1.0]\n\nOfficial\n\n## [')
+  assert.throws(() => mergeChangelogAdditions(base, ours, theirs), /Overlapping/)
+  assert.throws(
+    () => mergeChangelogAdditions(base, ours, base.replace('Original', 'Edited')),
+    /Existing/
+  )
+  assert.equal(mergeChangelogAdditions(base, ours, base), ours)
+})
+
+test('conflicting dependency updates abort without changing refs or leaving conflict files', (t) => {
+  const f = fixture(t)
+  f.write('package.json', {
+    name: 'fixture',
+    version: '0.1.0',
+    dependencies: { shared: '2' }
+  })
+  const before = f.commit('fork dependency')
+  f.git('checkout', 'main')
+  f.write('package.json', { name: 'fixture', version: '0.0.21', dependencies: { shared: '3' } })
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('conflicting official dependency'))
+  f.git('checkout', 'release')
+  assert.throws(() => prepareSync(f.cwd, 'v0.11.4'), /merge conflict/)
+  assert.equal(f.git('rev-parse', 'HEAD'), before)
+  assert.equal(f.git('status', '--porcelain'), '')
+  assert.equal(JSON.parse(readFileSync(join(f.cwd, 'package.json'))).dependencies.shared, '2')
+})
+
+test('merge conflicts and a diverged mirror fail closed without rewriting refs', (t) => {
+  const f = fixture(t)
+  f.write('shared.txt', 'fork\n')
+  const before = f.commit('fork change')
+  f.git('checkout', 'main')
+  f.write('shared.txt', 'upstream\n')
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('conflict'))
+  f.git('checkout', 'release')
+  assert.throws(() => prepareSync(f.cwd, 'v0.11.3'), /merge conflict/)
+  assert.equal(f.git('rev-parse', 'HEAD'), before)
+  assert.equal(f.git('status', '--porcelain'), '')
+  f.git('update-ref', 'refs/remotes/origin/main', before)
+  assert.throws(() => prepareSync(f.cwd, 'v0.11.3'))
+  assert.equal(f.git('rev-parse', 'HEAD'), before)
+})
+
+test('fork versioning increments independently and preserves an explicitly prepared higher version', () => {
+  assert.equal(nextForkVersion('0.1.0'), '0.1.1')
+  assert.equal(nextForkVersion('0.1.9'), '0.1.10')
+  assert.equal(nextForkVersion('1.2.3'), '1.2.4')
+  assert.equal(nextForkVersion('0.1.0', '0.2.0'), '0.2.0')
+  assert.throws(() => nextForkVersion('0.1.0', '0.0.21'), /downgrade/)
+  for (const invalid of ['0.1.0-rc.1', '01.1.0', '0.1', 'invalid', '0.1.9007199254740992']) {
+    assert.throws(() => nextForkVersion(invalid))
+    assert.throws(() => nextForkVersion('0.1.0', invalid))
+  }
+  assert.throws(() => nextForkVersion(`0.1.${Number.MAX_SAFE_INTEGER}`), /safe integer range/)
+})
+
+test('a prepared minor release retains its version and notes when upstream is integrated', (t) => {
+  const f = fixture(t)
+  f.git('checkout', '-b', 'prepared', 'origin/managed-services')
+  f.write('package.json', { name: 'fixture', version: '0.2.0' })
+  f.write('package-lock.json', { version: '0.2.0', packages: { '': { version: '0.2.0' } } })
+  f.write(
+    'CHANGELOG.md',
+    '# Changelog\n\n## [0.2.0] - 2026-09-29\n\nPrepared feature notes\n\n## [0.0.20]\n\nOfficial release\n'
+  )
+  f.git('update-ref', 'refs/remotes/origin/managed-services', f.commit('prepared minor release'))
+  f.git('checkout', 'release')
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').version, '0.2.0')
+  const changelog = readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8')
+  assert.equal(changelog.split('## [0.2.0]').length, 2)
+  assert.ok(changelog.includes('Prepared feature notes'))
+  assert.equal(prepareSync(f.cwd, 'v0.11.4').changed, false)
+})
+
+test('45 quiet days keep scheduling alive without source changes or another release', (t) => {
+  const f = fixture(t)
+  const lastCommit = Number(f.git('show', '-s', '--format=%ct', 'HEAD')) * 1000
+  const day = 24 * 60 * 60 * 1000
+  const tree = f.git('rev-parse', 'HEAD^{tree}')
+  assert.equal(keepSyncActive(f.cwd, lastCommit + 44 * day), false)
+  assert.equal(keepSyncActive(f.cwd, lastCommit + 45 * day), true)
+  assert.equal(f.git('rev-parse', 'HEAD^{tree}'), tree)
+  assert.equal(keepSyncActive(f.cwd, lastCommit + 46 * day), false)
+  const result = prepareSync(f.cwd, 'v0.11.1')
+  assert.equal(result.changed, false)
+  assert.equal(result.version, '0.1.0')
+})
+
+test('maintenance refuses local changes and invalid timestamps', (t) => {
+  const f = fixture(t)
+  assert.throws(() => keepSyncActive(f.cwd, NaN), /timestamp/)
+  f.write('local-edit.txt', 'must not be committed')
+  assert.throws(() => keepSyncActive(f.cwd), /clean checkout/)
+  assert.equal(f.git('status', '--porcelain'), '?? local-edit.txt')
+})
+
+test('sync is scheduled without manual dispatch and maintenance cannot publish a version', () => {
+  const source = readFileSync(
+    new URL('../.github/workflows/sync-upstream.yml', import.meta.url),
+    'utf8'
+  )
+  assert.match(source, /schedule:\s*\n\s*- cron: '17 6 \* \* \*'/)
+  assert.equal(
+    (source.match(/cron:/g) ?? []).length,
+    1,
+    'temporary publication schedules must be removed'
+  )
+  assert.match(source, /push:\s*\n\s*branches: \[managed-services\]/)
+  assert.ok(source.includes("- 'tests/upstream-sync.test.mjs'"))
+  assert.ok(
+    source.includes("if: steps.candidate.outputs.changed == 'true' || github.event_name == 'push'")
+  )
+  assert.match(
+    source,
+    /if: steps\.candidate\.outputs\.changed == 'false'\s*\n\s*run: node \.github\/scripts\/keep-sync-active\.mjs/
+  )
+  assert.ok(source.indexOf('keep-sync-active.mjs') < source.indexOf('git push --atomic'))
+  assert.ok(source.includes('if [ "$CHANGED" = "true" ]; then'))
+})
+
+test('workflow explicitly dispatches releases and keeps the default branch current', () => {
+  const source = readFileSync(
+    new URL('../.github/workflows/sync-upstream.yml', import.meta.url),
+    'utf8'
+  )
+  assert.ok(source.includes('actions: write'))
+  assert.ok(source.includes('gh workflow run release.yml --ref release'))
+  assert.ok(source.includes('HEAD:managed-services HEAD:release'))
+  assert.ok(source.includes('--atomic'))
+  assert.ok(source.includes('--repo open-webui/open-webui'))
+  assert.ok(source.indexOf('npm run test:ipc') < source.indexOf('git push --atomic'))
+})
+
+test('every gh operation targets an explicit repository after adding upstream', () => {
+  const source = readFileSync(
+    new URL('../.github/workflows/sync-upstream.yml', import.meta.url),
+    'utf8'
+  )
+  const commands = source.split('\n').filter((line) => /\bgh (release|workflow|run) /.test(line))
+  assert.equal(commands.length, 5)
+  for (const command of commands) {
+    assert.ok(
+      command.includes('--repo open-webui/open-webui') ||
+        command.includes('--repo "$GITHUB_REPOSITORY"'),
+      `GitHub command may select the upstream repository: ${command}`
+    )
+  }
+})
+
+test('release requires completed successful packaging and the Windows HTTP gate', () => {
+  const source = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+  const packageJob = source.match(/\n {4}package:\r?\n([\s\S]*?)(?=\n {4}release:)/)?.[1]
+  const releaseJob = source.match(/\n {4}release:\r?\n([\s\S]*)/)?.[1]
+  assert.ok(packageJob && releaseJob)
+  assert.match(packageJob, /^ {8}needs: compile\s*$/m)
+  assert.match(packageJob, /^\s+- os: ['"]?windows-[\w-]+['"]?\r?\n\s+arch: ['"]?x64['"]?\s*$/m)
+  assert.match(releaseJob, /^ {8}needs: package\s*$/m)
+  const condition = releaseJob.match(/ {8}if: >-\r?\n([\s\S]*?)\r?\n {8}runs-on:/)?.[1]
+  assert.ok(condition)
+  const allowed = (result, eventName = 'push', workflowCancelled = false) =>
+    runInNewContext(
+      condition,
+      {
+        github: { event_name: eventName, ref: 'refs/heads/release' },
+        needs: { package: { result } },
+        cancelled: () => workflowCancelled
+      },
+      { timeout: 1000 }
+    )
+  for (const result of ['success', 'failure', 'skipped', 'cancelled']) {
+    assert.equal(allowed(result), result === 'success', `package=${result} must fail closed`)
+  }
+  assert.equal(allowed('success', 'workflow_dispatch'), true)
+  assert.equal(allowed('success', 'pull_request'), false)
+  assert.equal(allowed('success', 'push', true), false)
+  const httpGate = packageJob.match(
+    /- name: Test installed Windows filesystem HTTP routes([\s\S]*?)(?=\n {12}- name:)/
+  )?.[1]
+  assert.ok(httpGate)
+  assert.match(httpGate, /if: runner\.os == 'Windows' && matrix\.arch == 'x64'/)
+  assert.match(httpGate, /python -B tests\/test_workspace_write_guard\.py --real --real-http -v/)
+  assert.doesNotMatch(httpGate, /continue-on-error:\s*true/)
+  const workspaceGate = packageJob.match(
+    /- name: Test shipped workspace switching and conditional preview tabs([\s\S]*?)(?=\n {12}- name:)/
+  )?.[1]
+  assert.ok(workspaceGate)
+  assert.match(workspaceGate, /--frontend-output \$env:OPEN_WEBUI_FRONTEND/)
+  assert.match(workspaceGate, /--test tests\/workspace-switch\.browser\.mts/)
+  assert.doesNotMatch(workspaceGate, /continue-on-error:\s*true/)
+})

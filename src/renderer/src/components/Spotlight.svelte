@@ -8,7 +8,6 @@
   let errorMsg = $state('')
   let showHint = $state(true)
 
-  // Bar position within the fullscreen window
   let barX = $state(0)
   let barY = $state(160)
   let screenW = $state(1920)
@@ -18,7 +17,6 @@
 
   const api = window.spotlightAPI
 
-  // ─── Error Toast ───
   let errorTimer: ReturnType<typeof setTimeout> | null = null
   const showError = (msg: string, duration = 4000) => {
     errorMsg = msg
@@ -26,7 +24,6 @@
     errorTimer = setTimeout(() => { errorMsg = '' }, duration)
   }
 
-  // ─── Submit ───
   const submit = () => {
     const q = query.trim()
     if (!q && images.length === 0) return
@@ -39,7 +36,6 @@
     images = []
   }
 
-  // ─── Bar Dragging ───
   let barDragging = $state(false)
   let barDragStart = { mx: 0, my: 0, bx: 0, by: 0 }
 
@@ -52,7 +48,6 @@
     barDragStart = { mx: e.clientX, my: e.clientY, bx: barX, by: barY }
   }
 
-  // ─── Region Selection ───
   let selecting = $state(false)
   let selStart = { x: 0, y: 0 }
   let selRect = $state({ x: 0, y: 0, w: 0, h: 0 })
@@ -102,7 +97,6 @@
       selecting = false
       showHint = false
       if (didDrag && selRect.w > 10 && selRect.h > 10) {
-        // Capture the selected region
         const result = await api?.captureRegion({
           x: selRect.x,
           y: selRect.y,
@@ -144,7 +138,6 @@
         barX = data.barOffset.x
         barY = data.barOffset.y
       } else {
-        // Default: center horizontally, near top
         barX = Math.round((screenW - BAR_W) / 2)
         barY = 160
       }
@@ -154,7 +147,6 @@
       }
       requestAnimationFrame(() => inputEl?.focus())
 
-      // Show screenshot hint
       showHint = true
     })
   })
@@ -168,9 +160,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="wrapper" onmousedown={onWrapperMouseDown}>
-  <!-- Screen capture overlay -->
   {#if selecting && didDrag}
-    <!-- Selection with shadow-based dimming -->
     <div
       class="selection"
       style="left:{selRect.x}px;top:{selRect.y}px;width:{selRect.w}px;height:{selRect.h}px"
@@ -180,7 +170,6 @@
       <div class="handle bl"></div>
       <div class="handle br"></div>
     </div>
-    <!-- Dimensions label -->
     <div
       class="dimensions"
       style="left:{selRect.x + selRect.w / 2}px;top:{selRect.y + selRect.h + 12}px"
@@ -234,7 +223,6 @@
     </div>
   </div>
 
-  <!-- Screenshot hint -->
   {#if showHint && images.length === 0 && !selecting}
     <div class="hint">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -244,7 +232,6 @@
     </div>
   {/if}
 
-  <!-- Error toast -->
   {#if errorMsg}
     <div class="error-toast">{errorMsg}</div>
   {/if}

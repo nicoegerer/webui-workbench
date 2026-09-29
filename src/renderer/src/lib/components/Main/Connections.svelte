@@ -8,18 +8,20 @@
   import Content from './Connections/Content.svelte'
   import StatusBar from './Connections/StatusBar.svelte'
   import LogPanel from './Connections/LogPanel.svelte'
+  import ManagedServiceLogPanel from '../../services/ManagedServiceLogPanel.svelte'
+  import type {
+    ManagedServiceSnapshot,
+    OpenWebUISyncResult,
+    WorkspaceTerminal
+  } from '../../../../../shared/services/types'
 
   interface Props {
-    onOpenSettings: () => void
+    onOpenSettings: (tab?: string) => void
     sidebarOpen: boolean
     activeConnectionName?: string
   }
 
-  let {
-    onOpenSettings,
-    sidebarOpen,
-    activeConnectionName = $bindable('')
-  }: Props = $props()
+  let { onOpenSettings, sidebarOpen, activeConnectionName = $bindable('') }: Props = $props()
 
   let isLocalConnection = $state(false)
   let showingLogs = $state(false)
@@ -37,42 +39,74 @@
   let settingsOpen = $state(false)
   let connectedUrl = $state('')
   let activeConnectionId = $state('')
+
+  onMount(() => {
+    const revealLocalIntegrations = () => {
+      if (!openConnections.has('local')) return
+      activeConnectionId = 'local'
+      connectedUrl = openConnections.get('local')!
+      view = 'connected'
+    }
+    window.addEventListener('desktop:webui-integrations-opened', revealLocalIntegrations)
+    return () => window.removeEventListener('desktop:webui-integrations-opened', revealLocalIntegrations)
+  })
   let connectingId = $state('')
   let openConnections: Map<string, string> = $state(new Map())
   let localInstalled = $state(false)
   let openTerminalInstalled = $state(false)
   let showAddConnectionModal = $state(false)
 
-  // Active log panel
   let activeLog = $state<'server' | 'open-terminal' | 'llama-server' | null>(null)
+  let activeManagedService = $state<ManagedServiceSnapshot | null>(null)
 
   const serverStatus = $derived($serverInfo?.status)
   const serverReachable = $derived($serverInfo?.reachable)
 
   const isInitializing = $derived($appState === 'initializing')
-  const localConn = $derived(localInstalled
-    ? { id: 'local', name: 'Open WebUI', type: 'local' as const, url: `http://127.0.0.1:${$config?.localServer?.port ?? 8080}` }
-    : null
+  const localConn = $derived(
+    localInstalled
+      ? {
+          id: 'local',
+          name: 'Open WebUI',
+          type: 'local' as const,
+          url: `http://127.0.0.1:${$config?.localServer?.port ?? 8080}`
+        }
+      : null
   )
   const remoteConnections = $derived($connections ?? [])
 
-  // Open Terminal state
   let openTerminalStatus = $state<string | null>(null)
-  let openTerminalInfo = $state<{ url?: string; apiKey?: string } | null>(null)
+  let openTerminalInfo = $state<{
+    url?: string
+    apiKey?: string
+    workingDirectory?: string
+  } | null>(null)
 
-  // Llama Server state
   let llamaCppStatus = $state<string | null>(null)
   let llamaCppInfo = $state<{ url?: string; pid?: number } | null>(null)
   let llamaCppSetupStatus = $state('')
   let openTerminalSetupStatus = $state('')
+  let workspaceBusy = $state(false)
+  let workspaceFeedback = $state<{ kind: 'success' | 'error'; message: string } | null>(null)
+  let workspaceFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 
-  const startInstall = async (options?: { installOpenTerminal?: boolean; installLlamaCpp?: boolean; installDir?: string }) => {
+  const TOOL_SERVER_SYNC_DEBOUNCE_MS = 600
+  let toolServerSyncTimer: ReturnType<typeof setTimeout> | null = null
+
+  const isGerman =
+    typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('de')
+  const l = (german: string, english: string): string => (isGerman ? german : english)
+
+  const startInstall = async (options?: {
+    installOpenTerminal?: boolean
+    installLlamaCpp?: boolean
+    installDir?: string
+  }) => {
     installPhase = 'working'
     installError = ''
     installStatus = ''
     toastVisible = false
     try {
-      // Save custom install directory before anything else
       if (options?.installDir) {
         const currentDir = await window.electronAPI.getInstallDir()
         if (options.installDir !== currentDir) {
@@ -80,15 +114,15 @@
         }
       }
 
-      // Check disk space before installing (minimum 5 GB)
       const MINIMUM_DISK_BYTES = 5 * 1024 * 1024 * 1024
       const disk = await window.electronAPI.getDiskSpace()
       if (disk?.free >= 0 && disk.free < MINIMUM_DISK_BYTES) {
         const availableGB = (disk.free / (1024 * 1024 * 1024)).toFixed(1)
-        throw new Error(`Not enough disk space. At least 5 GB is required (${availableGB} GB available).`)
+        throw new Error(
+          `Not enough disk space. At least 5 GB is required (${availableGB} GB available).`
+        )
       }
 
-      // Ensure Python and uv are installed before attempting package install
       const pythonReady = await window.electronAPI.getPythonStatus()
       if (!pythonReady) {
         const pythonOk = await window.electronAPI.installPython()
@@ -134,7 +168,6 @@
         throw new Error('Server did not become reachable. Please try again.')
       }
 
-      // Now connect — the server is ready
       installStatus = ''
       connect('local')
       installPhase = 'idle'
@@ -143,7 +176,9 @@
       installError = e?.message || $i18n.t('error.somethingWentWrong')
       toastVisible = true
       if (toastTimeout) clearTimeout(toastTimeout)
-      toastTimeout = setTimeout(() => { toastVisible = false }, 5000)
+      toastTimeout = setTimeout(() => {
+        toastVisible = false
+      }, 5000)
     }
   }
 
@@ -186,7 +221,6 @@
 
   const connect = (id: string) => {
     showingLogs = false
-    // Toggle: clicking the active connection unselects it
     if (activeConnectionId === id && view === 'connected') {
       connectingId = ''
       activeConnectionId = ''
@@ -196,19 +230,18 @@
     }
     // Persist as default so spotlight/startup always use the last-selected connection
     window.electronAPI.setDefaultConnection(id)
-    // Already-open connection — just switch to it
     if (openConnections.has(id)) {
       connectingId = ''
       activeConnectionId = id
       connectedUrl = openConnections.get(id)!
       view = 'connected'
+      syncOpenWebUIRegistration()
       return
     }
 
     activeConnectionId = id
 
     if (id === 'local') {
-      // Local needs server start — use IPC (no renderer-side conn needed)
       connectingId = id
       view = 'welcome'
       window.electronAPI.connectTo(id).then((result: any) => {
@@ -227,17 +260,18 @@
           if (installPhase !== 'working') {
             view = 'connected'
           }
+          syncOpenWebUIRegistration()
         }
       })
     } else {
       const conn = ($connections ?? []).find((c) => c.id === id)
       if (!conn) return
-      // Remote — open immediately, no IPC needed
       connectingId = ''
       openConnections.set(id, conn.url)
       openConnections = new Map(openConnections)
       connectedUrl = conn.url
       view = 'connected'
+      syncOpenWebUIRegistration()
     }
   }
 
@@ -277,7 +311,6 @@
     }
   })
 
-  // Sync back: when panel closes, tell parent
   $effect(() => {
     if (activeLog === null) {
       showingLogs = false
@@ -289,7 +322,6 @@
     window.electronAPI?.openInBrowser?.('https://github.com/open-webui/desktop')
   }
 
-  // ── Log panel PTY helpers ─────────────────────────────
   const getConnectPty = (log: string) => {
     return (callback: (data: string) => void) => {
       if (log === 'server') {
@@ -328,41 +360,102 @@
     return undefined
   }
 
-  // ── Status bar log selection ──────────────────────────
   const selectLog = (log: string) => {
+    activeManagedService = null
     activeLog = activeLog === log ? null : (log as typeof activeLog)
   }
 
-  // ── Webview event delivery ─────────────────────────────
-  // Single path: all events from the main process flow through here.
-  // Query events target a specific webview; everything else broadcasts.
+  const selectManagedService = (service: ManagedServiceSnapshot) => {
+    activeLog = null
+    activeManagedService = activeManagedService?.id === service.id ? null : service
+  }
+
+  // One event path: queries target a webview; other events broadcast.
   const sendToWebview = (event: any, connId?: string) => {
     const container = document.querySelector('.content-webview-container')
     if (!container) return
 
     const webviews = connId
-      ? [container.querySelector(`webview[partition="persist:connection-${connId}"]`) as any].filter(Boolean)
+      ? [
+          container.querySelector(`webview[partition="persist:connection-${connId}"]`) as any
+        ].filter(Boolean)
       : Array.from(container.querySelectorAll('webview'))
 
     for (const wv of webviews) {
       try {
-        // Attempt to send — throws if webview hasn't fired dom-ready yet
         wv.send('desktop:event', event)
       } catch {
-        // Webview not ready — queue delivery until dom-ready
         const onReady = () => {
           wv.removeEventListener('dom-ready', onReady)
-          try { wv.send('desktop:event', event) } catch (_) {}
+          try {
+            wv.send('desktop:event', event)
+          } catch (_) {}
         }
         wv.addEventListener('dom-ready', onReady)
       }
     }
   }
 
-  // Listen for events from main process
+  // The main process registers tools and terminals through the admin API, independently of webview creation.
+  const syncOpenWebUIRegistration = (): void => {
+    if (toolServerSyncTimer) clearTimeout(toolServerSyncTimer)
+    toolServerSyncTimer = setTimeout(() => {
+      window.electronAPI
+        .syncOpenWebUI()
+        .then((result: OpenWebUISyncResult) => reportRegistration(result))
+        .catch((cause: unknown) => console.error('Open WebUI registration failed:', cause))
+    }, TOOL_SERVER_SYNC_DEBOUNCE_MS)
+  }
+
+  const reportRegistration = (result?: OpenWebUISyncResult): void => {
+    if (!result) return
+
+    if (result.status === 'synced') {
+      // Open WebUI loads integrations on mount; reload only when the registered configuration changes.
+      sendToWebview({ type: 'page:reload' }, 'local')
+      return
+    }
+
+    if (result.status === 'skipped' && result.reason === 'not-admin') {
+      showWorkspaceFeedback(
+        'error',
+        l(
+          'Konnektoren und Arbeitsbereiche brauchen ein Open-WebUI-Adminkonto, um im Chat auswählbar zu sein.',
+          'Connectors and workspaces need an Open WebUI admin account to be selectable in chat.'
+        )
+      )
+      return
+    }
+    if (result.status === 'failed') {
+      showWorkspaceFeedback(
+        'error',
+        l(
+          `Registrierung in Open WebUI fehlgeschlagen (${result.reason ?? 'unbekannt'}).`,
+          `Registration in Open WebUI failed (${result.reason ?? 'unknown'}).`
+        )
+      )
+    }
+  }
+
   onMount(() => {
     window.electronAPI.onData((data: any) => {
-      // ── Connection opened (startup, tray click) ───────
+      if (data.type === 'managed-service:status' && data.data?.id === activeManagedService?.id) {
+        activeManagedService = data.data as ManagedServiceSnapshot
+      }
+      if (data.type === 'managed-service:status' || data.type === 'managed-services:changed') {
+        syncOpenWebUIRegistration()
+      }
+      if (
+        data.type === 'managed-services:changed' &&
+        activeManagedService &&
+        Array.isArray(data.data)
+      ) {
+        activeManagedService =
+          (data.data as ManagedServiceSnapshot[]).find(
+            (service) => service.id === activeManagedService?.id
+          ) ?? null
+      }
+
       if (data.type === 'connection:open' && data.data?.url) {
         const connId = data.data.connectionId ?? ''
         const incomingUrl = data.data.url
@@ -377,10 +470,10 @@
           activeConnectionId = connId
           if (installPhase !== 'working') view = 'connected'
         }
+        syncOpenWebUIRegistration()
         return
       }
 
-      // ── Spotlight / desktop query ─────────────────────
       if (data.type === 'query' && (data.data?.query || data.data?.files?.length)) {
         const connId = data.data.connectionId ?? ''
         const query = data.data.query
@@ -404,7 +497,6 @@
         return
       }
 
-      // ── Call shortcut ─────────────────────────────────
       if (data.type === 'call' && data.data?.connectionId) {
         const connId = data.data.connectionId ?? ''
         const baseUrl = data.data.url ?? ''
@@ -426,14 +518,47 @@
         return
       }
 
-      // ── Desktop-only state (not forwarded to webviews) ─
-      if (data.type === 'status:open-terminal') { openTerminalStatus = data.data; return }
-      if (data.type === 'status:open-terminal-setup') { openTerminalSetupStatus = data.data ?? ''; return }
-      if (data.type === 'open-terminal:ready') { openTerminalInfo = data.data; openTerminalStatus = 'started'; openTerminalSetupStatus = ''; return }
-      if (data.type === 'status:llamacpp') { llamaCppStatus = data.data; return }
-      if (data.type === 'status:llamacpp-setup') { llamaCppSetupStatus = data.data ?? ''; return }
-      if (data.type === 'llamacpp:ready') { llamaCppInfo = data.data; llamaCppStatus = 'started'; llamaCppSetupStatus = ''; return }
-      if (data.type === 'status:install') { installStatus = data.data ?? ''; return }
+      if (data.type === 'open-webui:sync') {
+        reportRegistration(data.data)
+        return
+      }
+      if (data.type === 'status:open-terminal') {
+        openTerminalStatus = data.data
+        return
+      }
+      if (data.type === 'status:open-terminal-setup') {
+        openTerminalSetupStatus = data.data ?? ''
+        return
+      }
+      if (data.type === 'status:workspace') {
+        workspaceStatus = data.data ?? ''
+        return
+      }
+      if (data.type === 'open-terminal:ready') {
+        openTerminalInfo = data.data
+        openTerminalStatus = data.data?.status ?? null
+        openTerminalSetupStatus = ''
+        syncOpenWebUIRegistration()
+        return
+      }
+      if (data.type === 'status:llamacpp') {
+        llamaCppStatus = data.data
+        return
+      }
+      if (data.type === 'status:llamacpp-setup') {
+        llamaCppSetupStatus = data.data ?? ''
+        return
+      }
+      if (data.type === 'llamacpp:ready') {
+        llamaCppInfo = data.data
+        llamaCppStatus = 'started'
+        llamaCppSetupStatus = ''
+        return
+      }
+      if (data.type === 'status:install') {
+        installStatus = data.data ?? ''
+        return
+      }
       if (data.type === 'packages:changed') {
         localInstalled = !!data.data?.['open-webui']
         return
@@ -443,7 +568,6 @@
         return
       }
 
-      // ── Everything else → broadcast to all webviews ───
       sendToWebview(data)
     })
 
@@ -455,25 +579,24 @@
       }
     })
 
-    // Check current Open Terminal state on mount
     window.electronAPI.getOpenTerminalInfo().then((info: any) => {
       if (info?.status) {
         openTerminalStatus = info.status
         openTerminalInfo = info
+        syncOpenWebUIRegistration()
       }
     })
 
-    // Check if Open Terminal package is installed
+    syncOpenWebUIRegistration()
+
     window.electronAPI.getOpenTerminalStatus().then((installed: boolean) => {
       openTerminalInstalled = installed
     })
 
-    // Check if Open WebUI package is installed
     window.electronAPI.getPackageVersion('open-webui').then((v: string | null) => {
       localInstalled = v !== null
     })
 
-    // Check llama-server state on mount
     window.electronAPI.getLlamaCppInfo().then((info: any) => {
       if (info?.status) {
         llamaCppStatus = info.status
@@ -483,6 +606,20 @@
       }
     })
   })
+
+  onDestroy(() => {
+    if (workspaceFeedbackTimer) clearTimeout(workspaceFeedbackTimer)
+    if (toolServerSyncTimer) clearTimeout(toolServerSyncTimer)
+  })
+
+  const showWorkspaceFeedback = (kind: 'success' | 'error', message: string): void => {
+    workspaceFeedback = { kind, message }
+    if (workspaceFeedbackTimer) clearTimeout(workspaceFeedbackTimer)
+    workspaceFeedbackTimer = setTimeout(
+      () => (workspaceFeedback = null),
+      kind === 'error' ? 9000 : 7000
+    )
+  }
 
   const toggleOpenTerminal = async () => {
     if (openTerminalStatus === 'starting') return
@@ -528,7 +665,10 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="h-full w-full flex flex-col bg-[#f5f5f7] dark:bg-[#0a0a0a] text-[#1d1d1f] dark:text-[#fafafa]" in:fade={{ duration: 200 }}>
+<div
+  class="h-full w-full flex flex-col bg-[#f5f5f7] dark:bg-[#0a0a0a] text-[#1d1d1f] dark:text-[#fafafa]"
+  in:fade={{ duration: 200 }}
+>
   <div class="flex-1 min-h-0 flex">
     {#if sidebarOpen}
       <Sidebar
@@ -542,7 +682,9 @@
         bind:settingsOpen
         onConnect={connect}
         onDisconnect={disconnect}
-        onAddView={() => { showAddConnectionModal = true }}
+        onAddView={() => {
+          showAddConnectionModal = true
+        }}
         {onOpenSettings}
         onRename={async (id, name) => {
           await window.electronAPI.updateConnection(id, { name })
@@ -572,7 +714,9 @@
       bind:autoInstall
       onStartInstall={startInstall}
       onAddConnection={addConnection}
-      onSetView={(v) => { view = v }}
+      onSetView={(v) => {
+        view = v
+      }}
     />
   </div>
 
@@ -585,18 +729,56 @@
           ? openTerminalStatus === 'started'
           : llamaCppStatus === 'started'}
       statusText={activeLog === 'server'
-        ? (serverStatus === 'starting' ? 'Starting Open WebUI…' : serverStatus === 'running' && !serverReachable ? 'Waiting for server…' : installStatus || '')
+        ? serverStatus === 'starting'
+          ? 'Starting Open WebUI…'
+          : serverStatus === 'running' && !serverReachable
+            ? 'Waiting for server…'
+            : installStatus || ''
         : activeLog === 'open-terminal'
-          ? (openTerminalStatus === 'stopping' ? 'Stopping Open Terminal…' : openTerminalSetupStatus || (openTerminalStatus === 'starting' ? 'Starting Open Terminal…' : ''))
-          : (llamaCppStatus === 'stopping' ? 'Stopping llama-server…' : llamaCppSetupStatus || (llamaCppStatus === 'starting' ? 'Starting llama-server…' : llamaCppStatus === 'setting-up' ? 'Setting up llama.cpp…' : ''))}
+          ? openTerminalStatus === 'stopping'
+            ? 'Stopping Open Terminal…'
+            : openTerminalSetupStatus ||
+              (openTerminalStatus === 'starting' ? 'Starting Open Terminal…' : '')
+          : llamaCppStatus === 'stopping'
+            ? 'Stopping llama-server…'
+            : llamaCppSetupStatus ||
+              (llamaCppStatus === 'starting'
+                ? 'Starting llama-server…'
+                : llamaCppStatus === 'setting-up'
+                  ? 'Setting up llama.cpp…'
+                  : '')}
       connectPty={getConnectPty(activeLog)}
       disconnectPty={getDisconnectPty(activeLog)}
       readonly={activeLog !== 'server'}
       onWrite={getOnWrite(activeLog)}
       onResize={getOnResize(activeLog)}
-      onStop={activeLog === 'open-terminal' ? toggleOpenTerminal : activeLog === 'llama-server' ? toggleLlamaCpp : undefined}
-      onClose={() => { activeLog = null; showingLogs = false }}
+      onStop={activeLog === 'open-terminal'
+        ? toggleOpenTerminal
+        : activeLog === 'llama-server'
+          ? toggleLlamaCpp
+          : undefined}
+      onClose={() => {
+        activeLog = null
+        showingLogs = false
+      }}
     />
+  {:else if activeManagedService}
+    <ManagedServiceLogPanel
+      service={activeManagedService}
+      onClose={() => (activeManagedService = null)}
+    />
+  {/if}
+
+  {#if workspaceFeedback}
+    <div
+      class="fixed bottom-10 left-1/2 z-[100] max-w-[min(680px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border px-4 py-2.5 text-[11px] shadow-xl backdrop-blur {workspaceFeedback.kind ===
+      'success'
+        ? 'border-emerald-500/25 bg-emerald-950/90 text-emerald-100'
+        : 'border-red-500/25 bg-red-950/90 text-red-100'}"
+      role={workspaceFeedback.kind === 'error' ? 'alert' : 'status'}
+    >
+      {workspaceFeedback.message}
+    </div>
   {/if}
 
   <StatusBar
@@ -608,7 +790,9 @@
     {openTerminalInstalled}
     llamaCppInstalled={!!llamaCppInfo?.binaryPath}
     {activeLog}
+    activeManagedServiceId={activeManagedService?.id ?? null}
     onSelectLog={selectLog}
+    onSelectManagedService={selectManagedService}
     onStartServer={async () => {
       if (!localInstalled) {
         // Not installed — trigger full install (handles Python/uv + package)

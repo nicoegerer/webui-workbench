@@ -8,7 +8,8 @@ import crypto from 'crypto'
 
 import * as tar from 'tar'
 
-import { app, shell, Notification, net as electronNet } from 'electron'
+import { app, shell, Notification, net as electronNet, session } from 'electron'
+import { prepareWorkspaceFrontend } from '../services/workspace-frontend'
 import { execFileSync, exec, spawn, execSync, execFile } from 'child_process'
 
 import log from 'electron-log'
@@ -17,7 +18,6 @@ log.transports.file.resolvePathFn = () => getLogFilePath('main')
 const serverLogger = log.create({ logId: 'server' })
 serverLogger.transports.file.resolvePath = () => getLogFilePath('server')
 
-// ─── Paths ──────────────────────────────────────────────
 
 export const getLogFilePath = (name: string = 'main'): string => {
   const logDir = path.join(getUserDataPath(), 'logs')
@@ -51,11 +51,7 @@ export const getUserDataPath = (): string => {
   return path.normalize(userDataDir)
 }
 
-/**
- * Root directory for heavyweight data (Python, models, llama.cpp).
- * Reads `installDir` from config.json synchronously so it's available
- * before any async init. Falls back to `getUserDataPath()`.
- */
+/** Resolve the heavyweight data directory synchronously, before async startup. */
 export const getInstallDir = (): string => {
   const configPath = path.join(getUserDataPath(), 'config.json')
   let customDir = ''
@@ -77,7 +73,6 @@ export const getInstallDir = (): string => {
 }
 
 export const getOpenWebUIDataPath = (): string => {
-  // Check config for custom data directory
   const configPath = path.join(getUserDataPath(), 'config.json')
   let customDir = ''
   try {
@@ -125,7 +120,6 @@ export const getSecretKey = (keyPath?: string, key?: string): string => {
   return key
 }
 
-// ─── Port Utils ─────────────────────────────────────────
 
 export const portInUse = async (port: number, host: string = '0.0.0.0'): Promise<boolean> => {
   return new Promise((resolve) => {
@@ -147,7 +141,6 @@ export const portInUse = async (port: number, host: string = '0.0.0.0'): Promise
   })
 }
 
-// ─── Python Download & Install ──────────────────────────
 
 const getPlatformString = () => {
   const platformMap = {
@@ -203,7 +196,6 @@ export const downloadFileWithProgress = async (url, downloadPath, onProgress) =>
     log.info('File downloaded successfully:', downloadPath)
     return downloadPath
   } catch (error) {
-    // Clean up partial downloads
     try {
       if (fs.existsSync(downloadPath)) {
         fs.unlinkSync(downloadPath)
@@ -262,7 +254,10 @@ const checkInternet = async () => {
   }
 }
 
-export const installPython = async (installationDir?: string, onStatus?: (status: string) => void): Promise<boolean> => {
+export const installPython = async (
+  installationDir?: string,
+  onStatus?: (status: string) => void
+): Promise<boolean> => {
   const pythonDownloadPath = getPythonDownloadPath()
   if (!fs.existsSync(pythonDownloadPath)) {
     if (!(await checkInternet())) {
@@ -296,10 +291,10 @@ export const installPython = async (installationDir?: string, onStatus?: (status
   } catch (error) {
     log.error(error)
     // Remove possibly-corrupted download so next retry re-downloads
-    try { fs.unlinkSync(pythonDownloadPath) } catch {}
-    throw new Error(
-      'Failed to extract Python. The download may be corrupted. Please try again.'
-    )
+    try {
+      fs.unlinkSync(pythonDownloadPath)
+    } catch {}
+    throw new Error('Failed to extract Python. The download may be corrupted. Please try again.')
   }
 
   if (!isPythonInstalled(installationDir)) {
@@ -347,24 +342,7 @@ export const getPythonPath = (installationDir?: string) => {
   return path.normalize(getPythonExecutablePath(installationDir || getPythonInstallationDir()))
 }
 
-/**
- * Build a process environment suitable for running the bundled Python.
- *
- * On Windows the standalone Python distribution ships its own OpenSSL DLLs
- * (`libssl-3-x64.dll`, `libcrypto-3-x64.dll`) next to `python.exe`.  If a
- * different OpenSSL installation (Git for Windows, Anaconda, Strawberry Perl,
- * etc.) appears earlier on the system `PATH`, Python picks up those mismatched
- * DLLs at load-time, which causes the fatal error:
- *
- *     OPENSSL_Uplink(..., 08): no OPENSSL_Applink
- *
- * To prevent this we prepend the Python installation directory to `PATH` so
- * Windows finds the correct DLLs first.  On non-Windows platforms this is a
- * harmless no-op.
- *
- * Any additional env overrides (e.g. `configEnvVars`) can be spread after
- * calling this helper.
- */
+/** Put bundled Python first on Windows PATH so its matching OpenSSL DLLs win over system installations. */
 const pythonEnv = (extra: Record<string, string> = {}): Record<string, string> => {
   const base: Record<string, string> = { ...process.env }
 
@@ -433,12 +411,17 @@ export const uninstallPython = (installationDir?: string): boolean => {
   return true
 }
 
-// ─── Package Management ─────────────────────────────────
 
-export const installPackage = (packageName: string, version?: string, onStatus?: (status: string) => void): Promise<boolean> => {
+export const installPackage = (
+  packageName: string,
+  version?: string,
+  onStatus?: (status: string) => void
+): Promise<boolean> => {
   return new Promise((resolve, reject) => {
     if (!isPythonInstalled()) {
-      return reject(new Error('Python is not installed. Please reinstall the app or run setup again.'))
+      return reject(
+        new Error('Python is not installed. Please reinstall the app or run setup again.')
+      )
     }
     const pythonPath = getPythonPath()
     const commandProcess = execFile(
@@ -477,9 +460,12 @@ export const installPackage = (packageName: string, version?: string, onStatus?:
       if (code === 0) {
         resolve(true)
       } else {
-        reject(new Error(
-          lastLine || `Package installation failed (exit code ${code}). Please check your internet connection and try again.`
-        ))
+        reject(
+          new Error(
+            lastLine ||
+              `Package installation failed (exit code ${code}). Please check your internet connection and try again.`
+          )
+        )
       }
     })
     commandProcess.on('error', (error) => {
@@ -489,10 +475,7 @@ export const installPackage = (packageName: string, version?: string, onStatus?:
   })
 }
 
-export const installPackages = async (
-  packages: string[],
-  version?: string
-): Promise<boolean> => {
+export const installPackages = async (packages: string[], version?: string): Promise<boolean> => {
   for (const pkg of packages) {
     const ok = await installPackage(pkg, version)
     if (!ok) return false
@@ -529,6 +512,40 @@ export const getPackageVersion = (packageName: string): string | null => {
   }
 }
 
+/** Consistent SQLite backup, including WAL, before a backend schema migration. */
+export const backupOpenWebUIDatabase = async (): Promise<string | null> => {
+  const source = path.join(getOpenWebUIDataPath(), 'webui.db')
+  if (!fs.existsSync(source)) return null
+  const backupDir = path.join(getOpenWebUIDataPath(), 'backups')
+  fs.mkdirSync(backupDir, { recursive: true })
+  const target = path.join(backupDir, `webui-before-update-${Date.now()}.db`)
+  const code = [
+    'import sqlite3, sys',
+    'from pathlib import Path',
+    'source = sqlite3.connect(Path(sys.argv[1]).as_uri() + "?mode=ro", uri=True)',
+    'target = sqlite3.connect(sys.argv[2])',
+    'try:',
+    '    source.backup(target)',
+    'finally:',
+    '    target.close()',
+    '    source.close()'
+  ].join('\n')
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      getPythonPath(),
+      ['-c', code, source, target],
+      {
+        env: pythonEnv(),
+        windowsHide: true,
+        timeout: 60_000
+      },
+      (error) => (error ? reject(error) : resolve())
+    )
+  })
+  log.info('Open WebUI database backup created:', target)
+  return target
+}
+
 export const uninstallPackage = (packageName: string): boolean => {
   const pythonPath = getPythonPath()
   if (!fs.existsSync(pythonPath)) return false
@@ -545,7 +562,6 @@ export const uninstallPackage = (packageName: string): boolean => {
   }
 }
 
-// ─── Server Management ──────────────────────────────────
 
 import * as pty from 'node-pty'
 
@@ -574,6 +590,17 @@ export const startServer = async (
     throw new Error(`Python executable not found at: ${pythonPath}`)
   }
 
+  const frontend = execFileSync(
+    pythonPath,
+    [
+      '-c',
+      "import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec('open_webui').origin).parent / 'frontend')"
+    ],
+    { encoding: 'utf8', windowsHide: true }
+  ).trim()
+  await prepareWorkspaceFrontend(frontend)
+  // Immutable asset URLs are unchanged; never reuse an unpatched cached chunk.
+  await session.fromPartition('persist:connection-local').clearCache()
   const commandArgs = ['-m', 'uv', 'run', 'open-webui', 'serve', '--host', host]
   const dataDir = getOpenWebUIDataPath()
   const secretKey = getSecretKey()
@@ -581,7 +608,6 @@ export const startServer = async (
     fs.mkdirSync(dataDir, { recursive: true })
   }
 
-  // Find available port
   let desiredPort = port || 8080
   let availablePort = desiredPort
   while (await portInUse(availablePort, host)) {
@@ -607,9 +633,7 @@ export const startServer = async (
       })
     })
   } catch (error) {
-    throw new Error(
-      `Failed to spawn PTY with ${pythonPath}: ${error?.message ?? error}`
-    )
+    throw new Error(`Failed to spawn PTY with ${pythonPath}: ${error?.message ?? error}`)
   }
 
   const pid = ptyProcess.pid
@@ -639,7 +663,6 @@ export const startServer = async (
   return { url, pid }
 }
 
-
 export async function stopAllServers(): Promise<void> {
   log.info('Stopping all servers...')
   const pidsToStop = Array.from(serverPIDs)
@@ -655,14 +678,12 @@ export async function stopAllServers(): Promise<void> {
         log.warn(`Failed to kill PTY process ${pid}:`, e)
       }
     } else {
-      // Fallback for any non-PTY processes
       await terminateProcessTree(pid, false)
     }
   }
 
   await sleep(2000)
 
-  // Force kill anything still running
   for (const pid of pidsToStop) {
     if (isProcessRunning(pid)) {
       await terminateProcessTree(pid, true)
@@ -755,7 +776,6 @@ export function getServerLog(pid: number): string[] {
   return serverLogs.get(pid) || []
 }
 
-// ─── URL Validation ─────────────────────────────────────
 
 export const checkUrlAndOpen = async (url: string, callback: Function = async () => {}) => {
   const maxAttempts = 1800
@@ -792,14 +812,16 @@ export const checkUrlAndOpen = async (url: string, callback: Function = async ()
 
 export const validateRemoteUrl = async (url: string): Promise<boolean> => {
   try {
-    const response = await electronNet.fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
+    const response = await electronNet.fetch(url, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(5000)
+    })
     return response.ok
   } catch {
     return false
   }
 }
 
-// ─── Config ─────────────────────────────────────────────
 
 export interface Connection {
   id: string
@@ -826,7 +848,8 @@ export interface AppConfig {
     enabled: boolean
     port: number
     cwd: string
-    apiKey: string
+    apiKey?: string
+    apiKeyEncrypted?: string
   }
   llamaCpp: {
     enabled: boolean
@@ -834,6 +857,11 @@ export interface AppConfig {
     version: string
     variant: string
     extraArgs: string[]
+  }
+  workspaces: {
+    recent: Array<{ path: string; name: string; lastUsedAt: number }>
+    /** Persisted local workspace selections; terminals start on conversation activation. */
+    active: string[]
   }
   envVars: Record<string, string>
   showSidebar: boolean
@@ -863,14 +891,18 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   openTerminal: {
     enabled: false,
-    cwd: '',
-    apiKey: ''
+    port: 39284,
+    cwd: ''
   },
   llamaCpp: {
     enabled: false,
     version: 'latest',
     variant: 'cpu',
     extraArgs: []
+  },
+  workspaces: {
+    recent: [],
+    active: []
   },
   envVars: {},
   showSidebar: false,
@@ -889,12 +921,22 @@ export const getConfig = async (): Promise<AppConfig> => {
   try {
     if (fs.existsSync(configPath)) {
       const data = await fs.promises.readFile(configPath, 'utf8')
-      return { ...DEFAULT_CONFIG, ...JSON.parse(data) }
+      const saved = JSON.parse(data) as Partial<AppConfig>
+      const savedWorkspaces = saved.workspaces
+      return {
+        ...DEFAULT_CONFIG,
+        ...saved,
+        // Persist only local recent/active state; cloud workspace selection belongs to the chat.
+        workspaces: {
+          recent: Array.isArray(savedWorkspaces?.recent) ? savedWorkspaces.recent : [],
+          active: Array.isArray(savedWorkspaces?.active) ? savedWorkspaces.active : []
+        }
+      }
     }
-    return { ...DEFAULT_CONFIG }
+    return structuredClone(DEFAULT_CONFIG)
   } catch (error) {
     log.error('Error reading config, using defaults:', error)
-    return { ...DEFAULT_CONFIG }
+    return structuredClone(DEFAULT_CONFIG)
   }
 }
 
@@ -904,7 +946,9 @@ export const setConfig = async (config: Partial<AppConfig>): Promise<void> => {
   // Serialize writes so concurrent callers don't race on the tmp file
   const previous = configWriteLock
   let resolve: () => void
-  configWriteLock = new Promise<void>((r) => { resolve = r })
+  configWriteLock = new Promise<void>((r) => {
+    resolve = r
+  })
   await previous
 
   const configPath = path.join(getUserDataPath(), 'config.json')
@@ -916,7 +960,6 @@ export const setConfig = async (config: Partial<AppConfig>): Promise<void> => {
     await fs.promises.rename(tmpPath, configPath)
   } catch (error) {
     log.error('Error writing config:', error)
-    // Clean up temp file
     try {
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
     } catch {}
@@ -957,7 +1000,6 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
-  // Remove llama.cpp binaries
   const llamaCppPath = path.join(getInstallDir(), 'llama.cpp')
   if (fs.existsSync(llamaCppPath)) {
     try {
@@ -968,7 +1010,6 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
-  // Remove downloaded models (huggingface + any user-added models)
   const modelsPath = path.join(getInstallDir(), 'models')
   if (fs.existsSync(modelsPath)) {
     try {
@@ -979,7 +1020,6 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
-  // Remove service lock files
   const locksPath = path.join(getUserDataPath(), 'locks')
   if (fs.existsSync(locksPath)) {
     try {
@@ -990,7 +1030,6 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
-  // Clear Electron session data (localStorage, cookies, cache, etc.)
   try {
     const { session } = require('electron')
     await session.defaultSession.clearStorageData()

@@ -1,0 +1,116 @@
+export const MANAGED_SERVICES_SCHEMA_VERSION = 2
+export const MCPO_API_KEY_PLACEHOLDER = '{{MCPO_API_KEY}}'
+
+export type ManagedServiceType = 'generic' | 'mcpo' | 'remote'
+export type ManagedServiceStatus = 'stopped' | 'starting' | 'running' | 'failed'
+
+export interface McpoServiceOptions {
+  serverCommand: string
+  serverArgs: string[]
+  port: number
+  runnerCommand?: string
+}
+
+export interface RemoteServiceOptions {
+  url: string
+  /** Explicit opt-in. Never use an installed CLI account merely because it exists. */
+  authSource?: 'token' | 'github-cli'
+}
+
+export interface ManagedServiceDefinition {
+  id: string
+  name: string
+  type: ManagedServiceType
+  command: string
+  args: string[]
+  cwd?: string
+  env?: Record<string, string>
+  enabled: boolean
+  healthCheckUrl?: string
+  autoRestart: boolean
+  restartLimit: number
+  startupTimeoutMs: number
+  mcpo?: McpoServiceOptions
+  remote?: RemoteServiceOptions
+  apiKey?: string
+  accessToken?: string
+}
+
+export interface ManagedServiceSnapshot extends ManagedServiceDefinition {
+  status: ManagedServiceStatus
+  pid?: number
+  restartCount: number
+  lastError?: string
+  externallyManaged?: boolean
+}
+
+export interface ManagedServiceIntegration {
+  url: string
+  bearerKey: string
+  commandPreview: string
+}
+
+/**
+ * A connector reduced to what Open WebUI needs for an entry in
+ * `TOOL_SERVER_CONNECTIONS`. mcpo connectors expose an OpenAPI document,
+ * remote endpoints are registered as Streamable HTTP MCP servers.
+ */
+export interface ManagedServiceToolTarget {
+  id: string
+  name: string
+  kind: 'openapi' | 'mcp'
+  url: string
+  path: string
+  key: string
+  enabled: boolean
+  ready: boolean
+}
+
+/** Outcome of writing connectors and workspaces into Open WebUI's config. */
+export interface OpenWebUISyncResult {
+  status: 'synced' | 'unchanged' | 'skipped' | 'failed'
+  reason?: string
+  toolServers: number
+  terminals: number
+}
+
+/** A workspace folder with its own Open Terminal instance. */
+export interface WorkspaceTerminal {
+  id: string
+  cwd: string
+  workingDirectory: string
+  port: number
+  url: string | null
+  apiKey: string | null
+  pid: number | null
+  status: string | null
+}
+
+export interface ManagedServiceImportPreview {
+  token: string
+  schemaVersion: number
+  services: Array<{
+    id: string
+    name: string
+    type: ManagedServiceType
+    commandPreview: string
+  }>
+  warnings: string[]
+}
+
+export type ManagedServicesRequest =
+  | { action: 'list' }
+  | { action: 'get'; id: string }
+  | { action: 'preview'; service: unknown }
+  | { action: 'upsert'; service: unknown }
+  | { action: 'remove'; id: string }
+  | { action: 'start'; id: string }
+  | { action: 'stop'; id: string }
+  | { action: 'logs'; id: string }
+  | { action: 'integration'; id: string }
+  | { action: 'tool-targets' }
+  | { action: 'suggest-port' }
+  | { action: 'export' }
+  | { action: 'import-preview' }
+  | { action: 'import-confirm'; token: string }
+  | { action: 'import-cancel'; token: string }

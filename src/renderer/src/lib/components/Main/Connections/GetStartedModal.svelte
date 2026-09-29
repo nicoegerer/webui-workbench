@@ -44,7 +44,6 @@
     transition:scale={{ start: 0.97, duration: 180 }}
     onmousedown={(e) => e.stopPropagation()}
   >
-    <!-- Visual header -->
     <div
       class="relative flex h-36 items-center justify-center overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-black dark:from-white dark:via-gray-100 dark:to-gray-200"
     >
@@ -66,7 +65,6 @@
       </div>
     </div>
 
-    <!-- Options -->
     <div class="px-6 py-4 flex flex-col divide-y divide-gray-100/30 dark:divide-gray-800/15">
       <div class="py-3.5 flex items-center justify-between gap-4">
         <div>
@@ -94,7 +92,6 @@
       </div>
     </div>
 
-    <!-- Advanced (collapsed) -->
     <div class="px-6 pb-4">
       <button
         class="flex items-center gap-1.5 bg-transparent border-none p-0 cursor-pointer"
@@ -131,7 +128,6 @@
       {/if}
     </div>
 
-    <!-- Footer -->
     <div class="px-5 pb-5 pt-1 flex flex-col gap-2">
       <button
         class="w-full rounded-xl bg-gray-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-all duration-200 hover:bg-gray-800 dark:hover:bg-gray-100 active:scale-[0.98] border-none cursor-pointer"

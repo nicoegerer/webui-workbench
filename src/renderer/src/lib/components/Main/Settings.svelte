@@ -8,15 +8,17 @@
   import OpenTerminal from './Settings/OpenTerminal.svelte'
   import InferenceRuntime from './Settings/InferenceRuntime.svelte'
   import Models from './Settings/Models.svelte'
+  import Services from './Settings/Services.svelte'
   import About from './Settings/About.svelte'
 
   interface Props {
     onClose: () => void
+    initialTab?: string
   }
 
-  let { onClose }: Props = $props()
+  let { onClose, initialTab = 'general' }: Props = $props()
 
-  let settingsTab = $state('general')
+  let settingsTab = $state(initialTab)
 
   const tabs = [
     {
@@ -53,6 +55,11 @@
       icon: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418'
     },
     {
+      id: 'services',
+      label: () => $i18n.t('settings.tabs.services'),
+      icon: 'M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h7.5M3.75 6.75h.008v.008H3.75V6.75zm0 5.25h.008v.008H3.75V12zm0 5.25h.008v.008H3.75v-.008zM20.25 6.75h.008v.008h-.008V6.75zm0 5.25h.008v.008h-.008V12zm0 5.25h.008v.008h-.008v-.008z'
+    },
+    {
       id: 'about',
       label: () => $i18n.t('settings.tabs.about'),
       icon: 'M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z'
@@ -64,7 +71,6 @@
   class="h-full w-full flex bg-[#f5f5f7] dark:bg-[#0a0a0a] text-[#1d1d1f] dark:text-[#fafafa]"
   in:fade={{ duration: 150 }}
 >
-  <!-- Settings sidebar -->
   <div
     class="w-[180px] shrink-0 flex flex-col border-r border-black/[0.06] dark:border-white/[0.06] bg-[#eee] dark:bg-[#111] px-1.5"
   >
@@ -101,7 +107,6 @@
   </div>
 
   <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
-    <!-- Content header -->
     <div
       class="flex items-center justify-between px-8 pt-5 pb-3 border-b border-black/[0.04] dark:border-white/[0.04]"
     >
@@ -132,6 +137,8 @@
         <OpenWebUI />
       {:else if settingsTab === 'connections'}
         <Connections />
+      {:else if settingsTab === 'services'}
+        <Services />
       {:else if settingsTab === 'terminal'}
         <OpenTerminal />
       {:else if settingsTab === 'inference'}

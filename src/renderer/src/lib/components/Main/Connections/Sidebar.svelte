@@ -15,7 +15,7 @@
     onConnect: (id: string) => void
     onDisconnect: () => void
     onAddView: () => void
-    onOpenSettings: () => void
+    onOpenSettings: (tab?: string) => void
     onRename: (id: string, name: string) => void
     onRemove: (id: string) => void
     openGithub: () => void
@@ -39,7 +39,6 @@
     openGithub
   }: Props = $props()
 
-  // Inline rename state
   let editingId = $state<string | null>(null)
   let editValue = $state('')
   let menuOpenId = $state<string | null>(null)
@@ -67,7 +66,6 @@
   class="w-[200px] shrink-0 flex flex-col bg-[#f5f5f7] dark:bg-[#0a0a0a] relative"
   in:fly={{ x: -200, duration: 200 }}
 >
-  <!-- Connections header -->
   <div class="flex items-center justify-between px-4 pt-2 pb-1.5">
     <span class="text-[10px] tracking-wider uppercase opacity-60"
       >{$i18n.t('sidebar.connections')}</span
@@ -91,9 +89,7 @@
     </button>
   </div>
 
-  <!-- Connection list -->
   <div class="flex-1 min-h-0 overflow-y-auto px-2">
-    <!-- Pinned: Open WebUI (local) -->
     {#if localConn && localInstalled}
       {@const isServerLoading =
         connectingId === localConn.id ||
@@ -293,7 +289,6 @@
           >
         {/if}
 
-        <!-- Three-dots menu -->
         <div class="ml-auto relative shrink-0">
           <button
             class="opacity-20 hover:opacity-70 transition bg-transparent border-none text-[#1d1d1f] dark:text-[#fafafa] p-0.5 leading-none"
@@ -403,7 +398,6 @@
     {/each}
   </div>
 
-  <!-- Settings popover -->
   {#if settingsOpen}
     <div class="fixed inset-0 z-40" onclick={() => (settingsOpen = false)}></div>
 
@@ -469,7 +463,6 @@
     </div>
   {/if}
 
-  <!-- Settings button (bottom) -->
   <div class="px-2 pb-3">
     <button
       class="w-full flex items-center gap-2 px-2 py-[6px] rounded-xl text-[12px] opacity-80 hover:opacity-70 hover:bg-black/4 dark:hover:bg-white/4 transition bg-transparent border-none text-[#1d1d1f] dark:text-[#fafafa] text-left"

@@ -23,25 +23,21 @@
     size: number
   }
 
-  // State
   let models = $state<HfModel[]>([])
   let loaded = $state(false)
   let deleting = $state<string | null>(null)
   let searchError = $state('')
   let modelsDir = $state('')
 
-  // Search state
   let searchQuery = $state('')
   let searchResults = $state<HfRepoResult[]>([])
   let searching = $state(false)
   let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Repo browser state
   let selectedRepo = $state<string | null>(null)
   let repoFiles = $state<HfFileInfo[]>([])
   let loadingFiles = $state(false)
 
-  // Download state — track active downloads in the "Downloaded" section
   let activeDownloads = $state<Map<string, { repo: string; filename: string; percent: number }>>(new Map())
 
   const dlKey = (repo: string, filename: string): string => `${repo}/${filename}`
@@ -188,7 +184,6 @@
 {:else}
 <div class="flex flex-col divide-y divide-white/[0.04]">
 
-  <!-- Models directory -->
   <div class="py-4 flex items-center justify-between gap-4">
     <div class="shrink-0">
       <div class="text-[13px] opacity-70">{$i18n.t('settings.models.modelsDirectory')}</div>
@@ -202,14 +197,12 @@
     </button>
   </div>
 
-  <!-- Downloaded models + active downloads -->
   <div class="py-4">
     <div class="text-[12px] opacity-50 mb-2">{$i18n.t('settings.models.downloadedModels')}</div>
 
     {#if models.length > 0 || hasActiveDownloads}
       <div class="flex flex-col">
 
-        <!-- Active downloads -->
         {#each [...activeDownloads.values()] as dl (dlKey(dl.repo, dl.filename))}
           <div class="flex items-center gap-3 py-2 group">
             <div class="min-w-0 flex-1">
@@ -237,7 +230,6 @@
           </div>
         {/each}
 
-        <!-- Completed downloads -->
         {#each models as model}
           <div class="flex items-center gap-3 py-2 group">
             <div class="min-w-0 flex-1">
@@ -265,7 +257,6 @@
     {/if}
   </div>
 
-  <!-- Download from HF -->
   <div class="py-4">
     <div class="text-[12px] opacity-50 mb-2">
       {#if selectedRepo}
@@ -284,7 +275,6 @@
     </div>
 
     {#if selectedRepo}
-      <!-- Repo file browser -->
       {#if loadingFiles}
         <div class="flex items-center gap-2 py-3 justify-center">
           <div class="w-3 h-3 rounded-full border-[1.5px] border-black/20 dark:border-white/30 border-t-transparent animate-spin"></div>
@@ -342,7 +332,6 @@
       {/if}
 
     {:else}
-      <!-- Search -->
       <div class="relative mb-2">
         <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-25 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />

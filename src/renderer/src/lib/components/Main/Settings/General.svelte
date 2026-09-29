@@ -12,10 +12,8 @@
   let installDirPath = $state('')
   let defaultInstallDir = $state('')
 
-  // Env vars editor state
   let envEntries = $state<{ key: string; value: string }[]>([])
 
-  // Language state
   let languages = $state<{ code: string; title: string }[]>([])
   let selectedLanguage = $state('en-US')
 
@@ -28,11 +26,9 @@
     theme = cfg?.theme ?? 'system'
     applyThemeClass(theme)
 
-    // Load install dir
     defaultInstallDir = await window.electronAPI.getInstallDir()
     installDirPath = cfg?.installDir || defaultInstallDir
 
-    // Load languages
     languages = await getLanguages()
     selectedLanguage = cfg?.language ?? localStorage.getItem('locale') ?? 'en-US'
   })
@@ -52,7 +48,6 @@
     await window.electronAPI.setConfig({ theme: newTheme })
     config.set(await window.electronAPI.getConfig())
 
-    // Push theme to all active Open WebUI webviews
     const container = document.querySelector('.content-webview-container')
     if (container) {
       container.querySelectorAll('webview').forEach((wv: any) => {
@@ -89,32 +84,26 @@
     saveEnvVars()
   }
 
-  // Shortcut recorder
   let shortcutValue = $state('')
   let recording = $state(false)
   let shortcutInputEl = $state<HTMLButtonElement | null>(null)
 
-  // Spotlight shortcut recorder
   let spotlightShortcutValue = $state('')
   let spotlightRecording = $state(false)
   let spotlightShortcutInputEl = $state<HTMLButtonElement | null>(null)
 
-  // Voice input shortcut recorder
   let voiceInputShortcutValue = $state('')
   let voiceInputRecording = $state(false)
   let voiceInputShortcutInputEl = $state<HTMLButtonElement | null>(null)
   let voiceInputEnabled = $state(true)
 
-  // Call shortcut recorder
   let callShortcutValue = $state('')
   let callRecording = $state(false)
   let callShortcutInputEl = $state<HTMLButtonElement | null>(null)
   let callEnabled = $state(true)
 
-  // Spotlight clipboard paste
   let spotlightClipboardPaste = $state(true)
 
-  // Keep shortcut value in sync with config store
   $effect(() => {
     if ($config?.globalShortcut !== undefined) {
       shortcutValue = $config.globalShortcut ?? ''
@@ -154,7 +143,6 @@
     if (e.altKey) parts.push('Alt')
     if (e.shiftKey) parts.push('Shift')
 
-    // Ignore bare modifier presses
     const ignore = ['Control', 'Meta', 'Alt', 'Shift']
     if (ignore.includes(e.key)) return null
 
@@ -183,11 +171,11 @@
     if (codeMap[e.code]) {
       key = codeMap[e.code]
     } else if (e.code.startsWith('Key')) {
-      key = e.code.slice(3) // KeyA → A
+      key = e.code.slice(3)
     } else if (e.code.startsWith('Digit')) {
-      key = e.code.slice(5) // Digit1 → 1
+      key = e.code.slice(5)
     } else if (e.code.startsWith('F') && /^F\d+$/.test(e.code)) {
-      key = e.code // F1, F2, etc.
+      key = e.code
     } else {
       key = e.key.length === 1 ? e.key.toUpperCase() : e.key
     }
@@ -415,6 +403,7 @@
       }}
     />
   </div>
+
 
   <div class="py-4 flex items-center justify-between">
     <div>
@@ -684,7 +673,6 @@
   </div>
   {/if}
 
-  <!-- Advanced (collapsed by default) -->
   <div class="py-4">
     <button
       class="flex items-center gap-1.5 bg-transparent border-none text-[#1d1d1f] dark:text-[#fafafa] p-0 cursor-pointer"
@@ -701,7 +689,6 @@
 
     {#if advancedOpen}
         <div class="flex flex-col divide-y divide-white/[0.04] mt-1">
-        <!-- Install location -->
         <div class="py-4 flex items-center justify-between gap-4">
           <div class="shrink-0">
             <div class="text-[13px] opacity-70">{$i18n.t('settings.general.installLocation')}</div>
@@ -737,7 +724,6 @@
           </div>
         </div>
 
-        <!-- Environment variables -->
         <div class="py-4">
           <div class="flex items-center justify-between mb-3">
             <div>

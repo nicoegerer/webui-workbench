@@ -8,7 +8,6 @@
   let openTerminalVersion = $state<string | null>(null)
   let llamaCppVersion = $state<string | null>(null)
 
-  // Update state
   type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error'
   let updateStatus = $state<UpdateStatus>('idle')
   let updateVersion = $state<string | null>(null)
@@ -17,12 +16,10 @@
 
   let cleanupDataListener: (() => void) | null = null
 
-  // Changelog state
   let changelogOpen = $state(false)
   let changelogLoading = $state(false)
   let changelogEntries = $state<{ version: string; date: string; body: string }[]>([])
 
-  // ── Easter Egg ────────────────────────────────────────
   let clickCount = $state(0)
   let clickTimer: ReturnType<typeof setTimeout> | null = null
   let easterEggActive = $state(false)
@@ -51,10 +48,8 @@
     showTypewriter = true
     typewriterText = ''
 
-    // Go fullscreen
     document.documentElement.requestFullscreen?.().catch(() => {})
 
-    // Full Matrix intro sequence
     const username = $appInfo?.username ?? 'Neo'
     const lines = [
       `Wake up, ${username}...`,
@@ -66,7 +61,6 @@
     let lineIdx = 0
     const typeLine = () => {
       if (lineIdx >= lines.length) {
-        // All lines done — show logo with knock sound
         showTypewriter = false
         typewriterTimers.push(setTimeout(() => {
           showReveal = true
@@ -84,7 +78,6 @@
           charIdx++
           typewriterTimers.push(setTimeout(typeChar, 140 + Math.random() * 60))
         } else {
-          // Hold, then clear and move to next line
           typewriterTimers.push(setTimeout(() => {
             typewriterText = ''
             showTypewriter = false
@@ -98,7 +91,6 @@
 
     typewriterTimers.push(setTimeout(typeLine, 1200))
 
-    // Auto-dismiss after 25 seconds
     dismissTimer = setTimeout(() => dismissEasterEgg(), 25000)
   }
 
@@ -112,7 +104,6 @@
       clearTimeout(dismissTimer)
       dismissTimer = null
     }
-    // Exit fullscreen first, then remove overlay after transition
     if (document.fullscreenElement) {
       document.exitFullscreen?.().then(() => {
         easterEggActive = false
@@ -134,7 +125,6 @@
       llamaCppVersion = info?.version ?? null
     } catch {}
 
-    // Listen for update events from main process
     cleanupDataListener = window.electronAPI.onData((data: any) => {
       switch (data.type) {
         case 'update:checking':
@@ -176,7 +166,7 @@
   }
 
   const openGithub = () => {
-    window.electronAPI?.openInBrowser?.('https://github.com/open-webui/desktop')
+    window.electronAPI?.openInBrowser?.('https://github.com/nicoegerer/webui-workbench')
   }
 
   const handleCheck = async () => {
@@ -243,6 +233,10 @@
 </script>
 
 <div class="flex flex-col divide-y divide-white/[0.04]">
+  <p class="py-4 text-[13px] opacity-70">
+    WebUI Workbench — community fork of Open WebUI Desktop.
+    Open WebUI by Open WebUI Inc. and contributors. Not an official distribution.
+  </p>
   <button
     class="w-full py-4 flex items-center justify-between bg-transparent border-none cursor-default text-[#1d1d1f] dark:text-[#fafafa]"
     onclick={handleVersionClick}
@@ -286,7 +280,6 @@
     <div class="text-[12px] opacity-30">{$appInfo?.platform ?? $i18n.t('common.unknown')}</div>
   </div>
 
-  <!-- Update section -->
   <div class="py-4">
     <div class="flex items-center justify-between">
       <div>
@@ -351,7 +344,6 @@
     </div>
   </div>
 
-  <!-- Changelog section -->
   <div class="py-4">
     <button
       class="text-[12px] opacity-40 hover:opacity-70 transition bg-transparent border-none text-[#1d1d1f] dark:text-[#fafafa] flex items-center gap-1.5"
@@ -408,7 +400,6 @@
 
 <div class="text-[10px] opacity-15 mt-4 leading-relaxed">{$i18n.t('settings.about.copyright')}<br />{$i18n.t('settings.about.createdBy')}</div>
 
-<!-- Easter Egg: Matrix Rain Overlay -->
 {#if easterEggActive}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->

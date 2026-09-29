@@ -8,14 +8,12 @@
   let duration = $state(0)
   let errorMsg = $state('')
 
-  // Waveform
   let levels: number[] = $state(Array(5).fill(0.15))
   let animFrame: number | null = null
 
   let timer: ReturnType<typeof setInterval> | null = null
   let errorTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Audio
   let mediaRecorder: MediaRecorder | null = null
   let audioChunks: Blob[] = []
   let mediaStream: MediaStream | null = null
@@ -23,7 +21,6 @@
   let audioCtx: AudioContext | null = null
   let dataArray: Uint8Array | null = null
 
-  // Dragging
   let dragging = false
   let dragStart = { mx: 0, my: 0, wx: 0, wy: 0 }
 
@@ -35,7 +32,6 @@
   const animateLevel = () => {
     if (analyser && dataArray) {
       analyser.getByteFrequencyData(dataArray)
-      // Sample 5 frequency bands
       const bands = 5
       const step = Math.floor(dataArray.length / bands)
       levels = Array.from({ length: bands }, (_, i) => {
@@ -58,21 +54,19 @@
   }
 
   const startRecording = async () => {
-    // Reset all state from any previous session
     cleanup()
     errorMsg = ''
     transcribing = false
     recording = true
     duration = 0
     audioChunks = []
-    animateLevel() // show placeholder bars immediately
+    animateLevel()
 
     // Wait for the start chime (played from main process) to finish
     // before activating mic — macOS ducks audio when mic activates
     await new Promise((r) => setTimeout(r, 500))
 
     try {
-      // Request system-level mic permission (macOS) before activating the mic
       const permStatus = await api?.checkMicPermission()
       if (permStatus === 'denied') {
         const msg = 'Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone, then restart the app.'
@@ -84,7 +78,6 @@
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
       audioChunks = []
 
-      // Set up analyser for real audio levels
       audioCtx = new AudioContext()
       analyser = audioCtx.createAnalyser()
       analyser.fftSize = 64

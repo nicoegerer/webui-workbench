@@ -19,7 +19,6 @@ import {
 import { getModelsDir } from './huggingface'
 import { ServiceLock, isProcessAlive } from './service-lock'
 
-// ─── State ──────────────────────────────────────────────
 
 let ptyProcess: pty.IPty | null = null
 let pid: number | null = null
@@ -30,7 +29,6 @@ let logBuffer: string[] = []
 const lock = new ServiceLock('llamacpp')
 let binaryPath: string | null = null
 
-// ─── Public Getters ─────────────────────────────────────
 
 export const getLlamaCppInfo = () => {
   // Lazily discover a cached binary on cold boot so the UI never falsely
@@ -69,7 +67,6 @@ export const getLlamaCppInfo = () => {
 export const getLlamaCppPty = (): pty.IPty | null => ptyProcess
 export const getLlamaCppLog = (): string[] => logBuffer
 
-// ─── Asset Resolution ───────────────────────────────────
 
 interface ReleaseAsset {
   name: string
@@ -86,20 +83,17 @@ const detectBestVariant = (): string => {
   // macOS: Metal is baked into the macOS binary; no variant choice needed.
   if (platform === 'darwin') return 'cpu'
 
-  // Check for NVIDIA GPU (CUDA)
   try {
     execFileSync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], {
       timeout: 5000,
       stdio: 'pipe'
     })
-    // NVIDIA GPU detected
     if (platform === 'win32') return 'cuda-12.4'
     // Linux: no CUDA asset currently available, fall through to other checks
   } catch {
     // nvidia-smi not available or no NVIDIA GPU
   }
 
-  // Check for Vulkan support
   try {
     if (platform === 'win32') {
       execFileSync('vulkaninfo', ['--summary'], { timeout: 5000, stdio: 'pipe' })
@@ -111,7 +105,6 @@ const detectBestVariant = (): string => {
     // Vulkan not available
   }
 
-  // Linux: check for ROCm (AMD GPU)
   if (platform === 'linux') {
     try {
       if (fs.existsSync('/opt/rocm') || fs.existsSync('/usr/lib/rocm')) {
@@ -125,9 +118,6 @@ const detectBestVariant = (): string => {
   return 'cpu'
 }
 
-/**
- * Resolve the variant — if 'auto' or empty, detect the best one.
- */
 const resolveVariant = (variant: string | undefined): string => {
   if (!variant || variant === 'auto') {
     const detected = detectBestVariant()
@@ -137,9 +127,6 @@ const resolveVariant = (variant: string | undefined): string => {
   return variant
 }
 
-/**
- * Determine the correct release asset name for this platform/arch/variant.
- */
 const getAssetPattern = (tag: string, variant: string): { pattern: string; isZip: boolean } => {
   const platform = process.platform
   const arch = process.arch
@@ -174,9 +161,6 @@ const getAssetPattern = (tag: string, variant: string): { pattern: string; isZip
   return { pattern: `llama-${tag}-bin-ubuntu-x64.tar.gz`, isZip: false }
 }
 
-/**
- * Find the llama-server binary inside the extracted directory.
- */
 const findBinary = (dir: string): string | null => {
   const exeName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'
 
@@ -205,7 +189,6 @@ const findBinary = (dir: string): string | null => {
   return null
 }
 
-// ─── Setup (Download & Extract) ─────────────────────────
 
 export const setupLlamaCpp = async (
   onStatus?: (status: string) => void
@@ -220,10 +203,8 @@ export const setupLlamaCpp = async (
     fs.mkdirSync(cacheBase, { recursive: true })
   }
 
-  // ── Check for existing cached binary before any network request ──
-  // This allows llama.cpp to start offline when previously installed.
+  // Cached binaries allow offline startup.
   if (version !== 'latest') {
-    // Pinned version — check its specific directory
     const pinnedDir = path.join(cacheBase, version)
     const pinnedBinary = fs.existsSync(pinnedDir) ? findBinary(pinnedDir) : null
     if (pinnedBinary) {
@@ -233,7 +214,6 @@ export const setupLlamaCpp = async (
       return pinnedBinary
     }
   } else {
-    // 'latest' — scan all cached version directories for a usable binary
     try {
       const cachedVersions = fs.readdirSync(cacheBase, { withFileTypes: true })
         .filter((d) => d.isDirectory())
@@ -271,7 +251,6 @@ export const setupLlamaCpp = async (
     }
     releaseData = await response.json()
   } catch (error) {
-    // Network unavailable — fall back to cached binary if we found one
     if (binaryPath) {
       log.info('Network unavailable, using cached llama-server binary:', binaryPath)
       onStatus?.('Ready (offline)')
@@ -401,8 +380,7 @@ export const checkLlamaCppUpdate = async (): Promise<{ currentVersion: string | 
 export const updateLlamaCpp = async (
   onStatus?: (status: string) => void
 ): Promise<{ url?: string; status?: string; pid?: number; binaryPath?: string; version?: string | null }> => {
-  // 1. Verify network is available BEFORE destructive operations —
-  //    don't delete the old binary if we can't download a replacement.
+  // Verify network availability before deleting the installed binary.
   onStatus?.('Checking for updates…')
   let releaseTag: string
   try {
@@ -425,10 +403,8 @@ export const updateLlamaCpp = async (
     )
   }
 
-  // 2. Stop if running
   await stopLlamaCpp()
   
-  // 3. Clear old cache directory (safe — we verified network above)
   const currentInfo = getLlamaCppInfo()
   if (currentInfo.version) {
     const cacheDir = path.join(getInstallDir(), 'llama.cpp', currentInfo.version)
@@ -442,18 +418,16 @@ export const updateLlamaCpp = async (
     }
   }
   
-  // 4. Temporarily enforce 'latest' in config so it fetches the newest
+  // Force latest for an explicit update, regardless of the saved version preference.
   const config = await getConfig()
   await setConfig({ llamaCpp: { ...config.llamaCpp, version: 'latest' } })
   
-  // 5. Download new release
   onStatus?.('Downloading update…')
   await setupLlamaCpp(onStatus)
   
   return getLlamaCppInfo()
 }
 
-// ─── Lifecycle ──────────────────────────────────────────
 
 export const startLlamaCpp = async (
   onStatus?: (status: string) => void
@@ -583,23 +557,15 @@ export const stopLlamaCpp = async (): Promise<void> => {
   lock.release()
 }
 
-/**
- * Validate whether the tracked llama.cpp process is still alive.
- * Used for crash recovery on app startup.
- */
 export const validateLlamaCppProcess = (): boolean => {
   if (!pid) return false
   if (isProcessAlive(pid)) return true
-  // Stale PID — clean up
   pid = null
   status = null
   lock.release()
   return false
 }
 
-/**
- * Uninstall llama.cpp — stop the server and remove all downloaded binaries.
- */
 export const uninstallLlamaCpp = async (): Promise<void> => {
   await stopLlamaCpp()
 

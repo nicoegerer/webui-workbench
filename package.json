@@ -1,20 +1,28 @@
 {
-  "name": "open-webui",
-  "version": "0.0.20",
+  "name": "webui-workbench",
+  "version": "0.1.0",
   "license": "AGPL-3.0",
-  "description": "Open WebUI Desktop",
+  "description": "Community fork of Open WebUI Desktop with optional connectors and local or GitHub workspaces",
   "main": "./out/main/index.js",
   "author": "Open WebUI Inc. (Timothy Jaeryang Baek)",
-  "homepage": "https://openwebui.com",
+  "homepage": "https://github.com/nicoegerer/webui-workbench",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicoegerer/webui-workbench.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nicoegerer/webui-workbench/issues"
+  },
   "scripts": {
     "format": "prettier --plugin prettier-plugin-svelte --write .",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "svelte-check": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "npm run typecheck:node && npm run svelte-check",
+    "test:ipc": "node --experimental-strip-types --test tests/open-terminal.test.mts tests/ipc-serialization.test.mts tests/tool-servers.test.mts tests/chat-payload.test.mts tests/workspace-chip.test.mts tests/terminal-store-bridge.test.mts tests/workspace-frontend.test.mts tests/github-contents.test.mts tests/github-write.test.mts tests/github-workspace-actions.test.mts tests/github-workspace-ipc.test.mts tests/github-fs.test.mts tests/github-cli.test.mts tests/github-preview.test.mts tests/workspace-lifecycle.test.mts tests/services-defaults.test.mts tests/runtime-update.test.mts tests/desktop-updater.test.mts tests/upstream-sync.test.mjs tests/release-assets.test.mjs tests/workspace-preview.test.mts tests/workspace-preview-ipc.test.mts tests/connector-catalog.test.mts",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "node .github/scripts/check-public-distribution.mjs && npm run typecheck && electron-vite build && node .github/scripts/check-built-workspace.mjs",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
@@ -38,6 +46,9 @@
     "tar": "^7.5.11",
     "tippy.js": "^6.3.7"
   },
+  "overrides": {
+    "@electron/rebuild": "4.0.6"
+  },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
@@ -49,6 +60,7 @@
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
     "eslint-plugin-svelte": "^3.13.1",
+    "js-yaml": "4.1.1",
     "prettier": "^3.7.4",
     "prettier-plugin-svelte": "^3.4.0",
     "svelte": "^5.45.6",

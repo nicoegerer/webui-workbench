@@ -49,7 +49,6 @@
 </script>
 
 <div class="h-full w-full relative overflow-hidden bg-[#f5f5f7] dark:bg-[#0a0a0a] text-[#1d1d1f] dark:text-[#fafafa]">
-  <!-- Video background -->
   <div class="absolute inset-0 overflow-hidden">
     <video
       bind:this={videoElement}
@@ -63,10 +62,8 @@
     </video>
   </div>
 
-  <!-- Drag region -->
   <div class="absolute top-0 left-0 right-0 h-8 drag-region z-10"></div>
 
-  <!-- Content -->
   {#if mounted}
     <div class="relative z-10 h-full flex flex-col justify-end px-8 pb-10">
       {#if view === 'main'}

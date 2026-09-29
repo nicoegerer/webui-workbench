@@ -1,4 +1,4 @@
 provider: github
-owner: open-webui
-repo: desktop
-updaterCacheDirName: desktop-updater
+owner: nicoegerer
+repo: webui-workbench
+updaterCacheDirName: webui-workbench-updater

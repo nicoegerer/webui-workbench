@@ -25,11 +25,9 @@
     config.set(await api.getConfig())
     connections.set(await api.getConnections())
 
-    // Apply saved theme
     const savedTheme = (await api.getConfig())?.theme ?? 'system'
     applyResolvedTheme(savedTheme)
 
-    // Listen for OS theme changes so "system" mode reacts in real-time
     themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     themeChangeHandler = () => {
       const currentTheme = $config?.theme ?? 'system'

@@ -22,7 +22,6 @@
   const install = async () => {
     phase = 'working'
     try {
-      // Save custom install directory before installing
       if (installDir && installDir !== defaultInstallDir) {
         await window.electronAPI.setConfig({ installDir })
       }
@@ -71,7 +70,6 @@
       {$i18n.t('setup.install.description')}
     </p>
 
-    <!-- Install location -->
     <div class="mb-6">
       <div class="text-[11px] opacity-40 mb-1.5">{$i18n.t('setup.install.installLocation')}</div>
       <div class="flex items-center gap-2">

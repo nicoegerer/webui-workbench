@@ -1,9 +1,9 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { managedServicesApi } from './services'
+import type { WorkspacePreviewInfo, WorkspacePreviewResult } from '../shared/workspace-preview'
 
-// ─── PTY MessagePort ────────────────────────────────────
-// MessagePorts stay in the preload (cannot cross contextBridge).
-// We expose simple functions so the renderer never touches the port.
+// MessagePorts cannot cross contextBridge; expose operations instead of ports.
 let activePtyPort: MessagePort | null = null
 let ptyOutputCallback: ((data: string) => void) | null = null
 
@@ -18,7 +18,6 @@ ipcRenderer.on('pty:port', (event, _data) => {
   port.start()
 })
 
-// ─── Open Terminal PTY MessagePort ──────────────────────
 let activeOtPtyPort: MessagePort | null = null
 let otPtyOutputCallback: ((data: string) => void) | null = null
 
@@ -33,7 +32,6 @@ ipcRenderer.on('open-terminal:pty:port', (event, _data) => {
   port.start()
 })
 
-// ─── llama.cpp PTY MessagePort ──────────────────────────
 let activeLsCppPtyPort: MessagePort | null = null
 let lsCppPtyOutputCallback: ((data: string) => void) | null = null
 
@@ -55,7 +53,6 @@ const api = {
     return () => ipcRenderer.removeListener('main:data', handler)
   },
 
-  // App
   getAppInfo: () => ipcRenderer.invoke('app:info'),
   getVersion: () => ipcRenderer.invoke('get:version'),
   resetApp: () => ipcRenderer.invoke('app:reset'),
@@ -70,19 +67,16 @@ const api = {
   notification: (title: string, body: string) =>
     ipcRenderer.invoke('notification', { title, body }),
 
-  // Config
   getConfig: () => ipcRenderer.invoke('get:config'),
   setConfig: (config: Record<string, any>) => ipcRenderer.invoke('set:config', config),
+  ...managedServicesApi,
 
-  // Python/uv
   installPython: () => ipcRenderer.invoke('install:python'),
   getPythonStatus: () => ipcRenderer.invoke('status:python'),
 
-  // Package
   installPackage: () => ipcRenderer.invoke('install:package'),
   getPackageStatus: () => ipcRenderer.invoke('status:package'),
 
-  // Server
   startServer: () => ipcRenderer.invoke('server:start'),
   stopServer: () => ipcRenderer.invoke('server:stop'),
   restartServer: () => ipcRenderer.invoke('server:restart'),
@@ -90,7 +84,6 @@ const api = {
   getServerLogs: () => ipcRenderer.invoke('server:logs'),
   clearServerLogs: () => ipcRenderer.invoke('server:logs:clear'),
 
-  // PTY — MessagePort stays in preload, renderer uses these functions
   listPtys: () => ipcRenderer.invoke('pty:list'),
   connectPty: (onOutput: (data: string) => void, pid?: number) => {
     ptyOutputCallback = onOutput
@@ -110,9 +103,9 @@ const api = {
     }
   },
 
-  // Open Terminal
   startOpenTerminal: () => ipcRenderer.invoke('open-terminal:start'),
   stopOpenTerminal: () => ipcRenderer.invoke('open-terminal:stop'),
+  syncOpenTerminal: () => ipcRenderer.invoke('open-terminal:sync'),
   getOpenTerminalInfo: () => ipcRenderer.invoke('open-terminal:info'),
   getOpenTerminalStatus: () => ipcRenderer.invoke('open-terminal:status'),
   connectOpenTerminalPty: (onOutput: (data: string) => void) => {
@@ -127,7 +120,6 @@ const api = {
     }
   },
 
-  // llama.cpp
   setupLlamaCpp: () => ipcRenderer.invoke('llamacpp:setup'),
   startLlamaCpp: () => ipcRenderer.invoke('llamacpp:start'),
   stopLlamaCpp: () => ipcRenderer.invoke('llamacpp:stop'),
@@ -148,7 +140,6 @@ const api = {
   updateLlamaCpp: () => ipcRenderer.invoke('llamacpp:update'),
   uninstallLlamaCpp: () => ipcRenderer.invoke('llamacpp:uninstall'),
 
-  // Hugging Face models
   listHfModels: () => ipcRenderer.invoke('huggingface:models:list'),
   getHfModelsDir: () => ipcRenderer.invoke('huggingface:models:dir'),
   downloadHfModel: (repo: string, filename: string, token?: string, expectedSize?: number) =>
@@ -162,31 +153,69 @@ const api = {
   getHfRepoFiles: (repo: string, token?: string) =>
     ipcRenderer.invoke('huggingface:repo:files', repo, token),
 
-  // Package
   getPackageVersion: (packageName: string) => ipcRenderer.invoke('package:version', packageName),
   uninstallPackage: (packageName: string) => ipcRenderer.invoke('package:uninstall', packageName),
 
-  // Connections
   getConnections: () => ipcRenderer.invoke('connections:list'),
   addConnection: (connection: any) => ipcRenderer.invoke('connections:add', connection),
   removeConnection: (id: string) => ipcRenderer.invoke('connections:remove', id),
-  updateConnection: (id: string, updates: any) => ipcRenderer.invoke('connections:update', id, updates),
+  updateConnection: (id: string, updates: any) =>
+    ipcRenderer.invoke('connections:update', id, updates),
   setDefaultConnection: (id: string) => ipcRenderer.invoke('connections:setDefault', id),
   connectTo: (id: string) => ipcRenderer.invoke('connections:connect', id),
   validateUrl: (url: string) => ipcRenderer.invoke('validate:url', url),
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
 
-  // Updater
+  // Guest calls return result objects instead of rejecting into the embedded chat.
+  workspaceChooseFolder: () => ipcRenderer.invoke('workspace:chip:choose-folder'),
+  workspaceRecent: () => ipcRenderer.invoke('workspace:chip:recent'),
+  workspaceListRepos: () => ipcRenderer.invoke('workspace:chip:repos'),
+  workspaceOpenLocal: (request: { path: string }) =>
+    ipcRenderer.invoke('workspace:chip:open', request?.path),
+  workspaceEnsure: (request: { path?: string; terminalId?: string }) =>
+    ipcRenderer.invoke('workspace:chip:ensure', request ?? {}),
+  workspaceKeepAlive: (request: { ids: string[] }) =>
+    ipcRenderer.invoke('workspace:chip:keep-alive', request?.ids ?? []),
+  workspaceMountRepo: (request: { repoFullName: string; branch: string }) =>
+    ipcRenderer.invoke('workspace:chip:cloud', {
+      repoFullName: request?.repoFullName,
+      branch: request?.branch
+    }),
+
+  syncOpenWebUI: () => ipcRenderer.invoke('open-webui:sync'),
+
+  // Address a registered workspace, never an arbitrary renderer-supplied disk path.
+  workspacePreviewInspect: (request: {
+    terminalId: string
+  }): Promise<{ available: boolean; entryPath?: string }> =>
+    ipcRenderer.invoke('workspace:preview:inspect', { terminalId: request?.terminalId }),
+  workspacePreviewOpen: (request: {
+    terminalId: string
+    entryPath?: string
+  }): Promise<WorkspacePreviewResult> =>
+    ipcRenderer.invoke('workspace:preview:open', {
+      terminalId: request?.terminalId,
+      entryPath: request?.entryPath
+    }),
+  workspacePreviewClose: (request: {
+    id: string
+  }): Promise<{ ok: true } | Extract<WorkspacePreviewResult, { ok: false }>> =>
+    ipcRenderer.invoke('workspace:preview:close', { id: request?.id }),
+  workspacePreviewGetActive: (): Promise<
+    | { ok: true; preview: WorkspacePreviewInfo | null }
+    | Extract<WorkspacePreviewResult, { ok: false }>
+  > => ipcRenderer.invoke('workspace:preview:get-active'),
+
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),
 
-  // Changelog
   getChangelog: () => ipcRenderer.invoke('app:changelog'),
 
-  // Auth token relay from webview
   setAuthToken: (token: string) => ipcRenderer.invoke('app:setAuthToken', token)
 }
+
+export type DesktopApi = typeof api
 
 if (process.contextIsolated) {
   try {

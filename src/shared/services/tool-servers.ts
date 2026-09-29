@@ -1,0 +1,262 @@
+import type { ManagedServiceToolTarget } from './types'
+
+/**
+ * Prefix that marks a `TOOL_SERVER_CONNECTIONS` entry as owned by the desktop
+ * registry. Entries without it were added by hand in Open WebUI and are never
+ * modified or removed by a sync.
+ */
+export const DESKTOP_TOOL_PREFIX = 'desktop-'
+
+export const shouldWriteTerminalServers = (
+  current: TerminalServerConnection[],
+  next: TerminalServerConnection[],
+  refresh = false
+): boolean => refresh || JSON.stringify(current) !== JSON.stringify(next)
+
+/** Open WebUI keeps extra keys on these entries, so unknown fields are preserved. */
+export interface ToolServerConnection {
+  type?: string
+  url?: string
+  spec_type?: string
+  spec?: string
+  path?: string
+  auth_type?: string
+  key?: string
+  config?: {
+    enable?: boolean
+    function_name_filter_list?: unknown
+    access_grants?: unknown[]
+    [key: string]: unknown
+  }
+  info?: { id?: string; name?: string; description?: string; [key: string]: unknown }
+  [key: string]: unknown
+}
+
+export const toolServerInfoId = (serviceId: string): string => `${DESKTOP_TOOL_PREFIX}${serviceId}`
+
+
+/**
+ * The id Open WebUI uses for a registered connector. OpenAPI servers and native
+ * MCP servers are addressed differently — see `routers/tools.py`.
+ */
+export const connectorToolId = (target: Pick<ManagedServiceToolTarget, 'id' | 'kind'>): string => {
+  const infoId = toolServerInfoId(target.id)
+  return target.kind === 'mcp' ? `server:mcp:${infoId}` : `server:${infoId}`
+}
+
+const isDesktopToolId = (id: string): boolean =>
+  id.startsWith(`server:${DESKTOP_TOOL_PREFIX}`) ||
+  id.startsWith(`server:mcp:${DESKTOP_TOOL_PREFIX}`)
+
+/**
+ * Desktop connectors are added to every outgoing request by the guest bridge.
+ * Keeping them in `settings.ui.tools` as well makes Open WebUI count and render
+ * them as user-selected tools, so remove only our ids and preserve everything
+ * the user selected explicitly.
+ */
+export const stripDesktopDefaultTools = (current: string[]): string[] =>
+  current.filter((id) => typeof id === 'string' && !isDesktopToolId(id))
+
+
+export const CLOUD_WORKSPACE_MARKER_START = '<!-- open-webui-desktop:cloud-workspace -->'
+export const CLOUD_WORKSPACE_MARKER_END = '<!-- /open-webui-desktop:cloud-workspace -->'
+
+export interface CloudWorkspace {
+  repoFullName: string
+  branch: string
+}
+
+const cloudWorkspaceBlock = (workspace: CloudWorkspace): string =>
+  [
+    CLOUD_WORKSPACE_MARKER_START,
+    `The active workspace is the GitHub repository \`${workspace.repoFullName}\` on branch \`${workspace.branch}\`.`,
+    'Work in it through the GitHub tools: read files with the repository content tools and write',
+    'changes by committing to that branch. There is no local checkout of this repository, so do',
+    'not look for its files on disk and do not run git against it in a terminal.',
+    CLOUD_WORKSPACE_MARKER_END
+  ].join('\n')
+
+/**
+ * Declare the cloud workspace in the user's system prompt without disturbing
+ * anything they wrote themselves; the block is delimited so it can be replaced
+ * or removed on the next change.
+ */
+export const applyCloudWorkspacePrompt = (
+  system: string,
+  workspace: CloudWorkspace | null
+): string => {
+  const source = typeof system === 'string' ? system : ''
+  const start = source.indexOf(CLOUD_WORKSPACE_MARKER_START)
+  const endMarker = source.indexOf(CLOUD_WORKSPACE_MARKER_END)
+  const end = endMarker === -1 ? -1 : endMarker + CLOUD_WORKSPACE_MARKER_END.length
+
+  const before = start === -1 ? source : source.slice(0, start)
+  const after = start === -1 || end === -1 ? '' : source.slice(end)
+  const userText = start === -1 ? source : `${before.trimEnd()}\n${after.trimStart()}`.trim()
+
+  if (!workspace) return userText
+  return userText
+    ? `${userText}\n\n${cloudWorkspaceBlock(workspace)}`
+    : cloudWorkspaceBlock(workspace)
+}
+
+/** A workspace terminal as Open WebUI stores it under `terminal_server.connections`. */
+export interface TerminalServerConnection {
+  id?: string
+  name?: string
+  enabled?: boolean
+  url?: string
+  path?: string
+  key?: string
+  auth_type?: string
+  config?: Record<string, unknown> | null
+  [key: string]: unknown
+}
+
+export interface WorkspaceTerminalTarget {
+  id: string
+  cwd: string
+  url: string | null
+  apiKey: string | null
+}
+
+/** The native picker renders names, not ids; use a deterministic name to distinguish folders and repositories. */
+export const desktopTerminalSelectorName = (id: string): string =>
+  `open-webui-desktop-terminal:${id}`
+
+/** Register both a terminal for FileNav and an OpenAPI server for model tools;
+* terminal_id alone does not guarantee tool availability in every model/runtime combination. */
+export const workspaceToolTargetId = (terminalId: string): string => `workspace-${terminalId}`
+
+export const workspaceToolId = (terminalId: string): string =>
+  `server:${toolServerInfoId(workspaceToolTargetId(terminalId))}`
+
+export const workspaceTerminalToolTarget = (
+  terminal: WorkspaceTerminalTarget
+): ManagedServiceToolTarget => ({
+  id: workspaceToolTargetId(terminal.id),
+  name: `Open Terminal · ${terminal.cwd}`,
+  kind: 'openapi',
+  url: terminal.url ?? '',
+  path: 'openapi.json',
+  key: terminal.apiKey ?? '',
+  enabled: Boolean(terminal.url),
+  ready: Boolean(terminal.url)
+})
+
+const terminalEntry = (
+  terminal: WorkspaceTerminalTarget,
+  existing: TerminalServerConnection | null
+): TerminalServerConnection => ({
+  ...(existing ?? {}),
+  id: terminal.id,
+  name: desktopTerminalSelectorName(terminal.id),
+  enabled: true,
+  url: terminal.url ?? '',
+  path: '/openapi.json',
+  key: terminal.apiKey ?? '',
+  auth_type: 'bearer',
+  config: existing?.config ?? null
+})
+
+/**
+ * Replace desktop-owned terminals and keep everything else.
+ *
+ * Only the identifiable id-less legacy desktop entry is dropped. A loopback
+ * address alone is not ownership evidence: users may add their own local tools.
+ */
+export const mergeTerminalServers = (
+  current: TerminalServerConnection[],
+  terminals: WorkspaceTerminalTarget[]
+): TerminalServerConnection[] => {
+  const managed = new Map(terminals.map((terminal) => [terminal.id, terminal]))
+  const merged: TerminalServerConnection[] = []
+  const applied = new Set<string>()
+
+  for (const entry of current) {
+    const id = typeof entry?.id === 'string' ? entry.id : ''
+
+    if (!id) {
+      const url = typeof entry?.url === 'string' ? entry.url : ''
+      if (
+        entry.name === 'Local Open Terminal' &&
+        /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(?:\/|$)/i.test(url)
+      )
+        continue
+      merged.push(entry)
+      continue
+    }
+
+    if (!id.startsWith(DESKTOP_TOOL_PREFIX)) {
+      merged.push(entry)
+      continue
+    }
+
+    const terminal = managed.get(id)
+    if (!terminal) continue
+    merged.push(terminalEntry(terminal, entry))
+    applied.add(id)
+  }
+
+  for (const [id, terminal] of managed) {
+    if (!applied.has(id)) {
+      merged.push(terminalEntry(terminal, null))
+    }
+  }
+
+  return merged
+}
+
+/** Match AddToolServerModal's payload so synced entries remain editable in integration settings. */
+export const toolServerEntry = (
+  target: ManagedServiceToolTarget,
+  existing: ToolServerConnection | null
+): ToolServerConnection => ({
+  ...(existing ?? {}),
+  type: target.kind,
+  url: target.url,
+  spec_type: 'url',
+  spec: existing?.spec ?? '',
+  path: target.kind === 'openapi' ? target.path || 'openapi.json' : (existing?.path ?? ''),
+  auth_type: target.key ? 'bearer' : 'none',
+  key: target.key,
+  config: {
+    enable: target.enabled,
+    function_name_filter_list: existing?.config?.function_name_filter_list ?? '',
+    access_grants: existing?.config?.access_grants ?? []
+  },
+  info: {
+    ...(existing?.info ?? {}),
+    id: toolServerInfoId(target.id),
+    name: target.name,
+    description: existing?.info?.description ?? ''
+  }
+})
+
+/** Replace desktop-owned entries by info.id, dropping absent targets and preserving all user-owned entries. */
+export const mergeToolServers = (
+  current: ToolServerConnection[],
+  targets: ManagedServiceToolTarget[]
+): ToolServerConnection[] => {
+  const managed = new Map(targets.map((target) => [toolServerInfoId(target.id), target]))
+  const merged: ToolServerConnection[] = []
+  const applied = new Set<string>()
+
+  for (const entry of current) {
+    const infoId = typeof entry?.info?.id === 'string' ? entry.info.id : ''
+    if (!infoId.startsWith(DESKTOP_TOOL_PREFIX)) {
+      merged.push(entry)
+      continue
+    }
+    const target = managed.get(infoId)
+    if (!target) continue
+    merged.push(toolServerEntry(target, entry))
+    applied.add(infoId)
+  }
+
+  for (const [infoId, target] of managed) {
+    if (!applied.has(infoId)) merged.push(toolServerEntry(target, null))
+  }
+
+  return merged
+}

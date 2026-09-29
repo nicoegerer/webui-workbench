@@ -1,0 +1,301 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+import {
+  applyWorkspaceToPayload,
+  CLOUD_INSTRUCTION_MARKER,
+  type ChatPayloadPatch
+} from '../src/shared/services/chat-payload.ts'
+
+const CONNECTORS = ['server:desktop-garmin', 'server:mcp:desktop-github']
+
+const patch = (overrides: Partial<ChatPayloadPatch> = {}): ChatPayloadPatch => ({
+  selection: null,
+  alwaysOnToolIds: CONNECTORS,
+  ...overrides
+})
+
+const userTurn = (): Array<Record<string, string>> => [
+  { role: 'user', content: 'was war mein letztes training' }
+]
+
+
+test('connectors are added to a request that selected no tools', () => {
+  const out = applyWorkspaceToPayload({ messages: userTurn() }, patch())
+
+  assert.deepEqual(out.tool_ids, CONNECTORS)
+})
+
+test('tools the user picked in the chat are kept alongside the connectors', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: ['my_python_tool'] },
+    patch()
+  )
+
+  assert.deepEqual(out.tool_ids, ['my_python_tool', ...CONNECTORS])
+})
+
+test('a connector already selected is not added twice', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: ['server:desktop-garmin'] },
+    patch()
+  )
+
+  assert.deepEqual(out.tool_ids, ['server:desktop-garmin', 'server:mcp:desktop-github'])
+})
+
+test('no tool_ids key is invented when there is nothing to add', () => {
+  const out = applyWorkspaceToPayload({ messages: userTurn() }, patch({ alwaysOnToolIds: [] }))
+
+  assert.ok(!('tool_ids' in out))
+})
+
+
+test('a local workspace sets the terminal for this request', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn() },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-abc123' } })
+  )
+
+  assert.equal(out.terminal_id, 'desktop-ws-abc123')
+  assert.deepEqual(out.tool_ids, ['server:desktop-workspace-desktop-ws-abc123', ...CONNECTORS])
+  assert.ok(
+    (out.messages as Array<Record<string, string>>).some((message) =>
+      message.content.includes('[desktop-local-workspace]')
+    )
+  )
+})
+
+test('a selected workspace enables terminal capability on the model item', () => {
+  const out = applyWorkspaceToPayload(
+    {
+      messages: userTurn(),
+      model_item: { info: { meta: { capabilities: { terminal: false, vision: true } } } }
+    },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-abc123' } })
+  )
+
+  const modelItem = out.model_item as {
+    info: { meta: { capabilities: Record<string, boolean> } }
+  }
+  assert.equal(modelItem.info.meta.capabilities.terminal, true)
+  assert.equal(modelItem.info.meta.capabilities.vision, true)
+})
+
+test('a local workspace overrides a terminal Open WebUI had selected', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), terminal_id: 'desktop-ws-other' },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-abc123' } })
+  )
+
+  assert.equal(out.terminal_id, 'desktop-ws-abc123')
+})
+
+test('the local workspace tool server is never added twice', () => {
+  const workspaceToolId = 'server:desktop-workspace-desktop-ws-abc123'
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: [workspaceToolId] },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-abc123' } })
+  )
+
+  assert.equal((out.tool_ids as string[]).filter((id) => id === workspaceToolId).length, 1)
+})
+
+test('filesystem functions survive a router truncating a large connector to 128 tools', () => {
+  const id = 'server:desktop-workspace-desktop-ws-test'
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: CONNECTORS },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-test' } })
+  )
+  // Apply Open WebUI's ordered OpenAPI expansion followed by the provider's tool-count limit.
+  const specs = (out.tool_ids as string[])
+    .flatMap((server) =>
+      server === id
+        ? ['write_file', 'read_file', 'list_files', 'run_command']
+        : Array.from({ length: 200 }, (_, index) => `${server}_${index}`)
+    )
+    .slice(0, 128)
+  for (const name of ['write_file', 'read_file', 'list_files', 'run_command']) {
+    assert.ok(specs.includes(name), `${name} must reach the model`)
+  }
+})
+
+test('switching or detaching a workspace removes old filesystem servers', () => {
+  const first = applyWorkspaceToPayload(
+    { messages: userTurn() },
+    patch({
+      selection: { mode: 'local', terminalId: 'desktop-ws-first' }
+    })
+  )
+  const second = applyWorkspaceToPayload(
+    first,
+    patch({
+      selection: { mode: 'local', terminalId: 'desktop-ws-second' }
+    })
+  )
+  assert.deepEqual(second.tool_ids, ['server:desktop-workspace-desktop-ws-second', ...CONNECTORS])
+  const detached = applyWorkspaceToPayload(second, patch())
+  assert.deepEqual(detached.tool_ids, CONNECTORS)
+  assert.ok(!('terminal_id' in detached))
+})
+
+
+test('a cloud workspace names the repository and keeps its mounted terminal', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), terminal_id: 'desktop-ws-abc123' },
+    patch({
+      selection: {
+        mode: 'cloud',
+        repoFullName: 'example/first-project',
+        branch: 'main',
+        terminalId: 'desktop-gh-test1'
+      }
+    })
+  )
+
+  assert.equal(out.terminal_id, 'desktop-gh-test1')
+  assert.deepEqual(out.tool_ids, ['server:desktop-workspace-desktop-gh-test1', ...CONNECTORS])
+  const messages = out.messages as Array<Record<string, string>>
+  assert.equal(messages[0].role, 'system')
+  assert.ok(messages[0].content.includes('example/first-project'))
+  assert.ok(messages[0].content.includes('`main`'))
+  assert.ok(messages[0].content.includes('write_file'))
+  assert.ok(messages[0].content.includes('commit'))
+  assert.equal(messages[1].role, 'user')
+})
+
+test('the instruction is placed after the existing system prompt, not before it', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: [{ role: 'system', content: 'Antworte auf Deutsch.' }, ...userTurn()] },
+    patch({
+      selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' }
+    })
+  )
+
+  const messages = out.messages as Array<Record<string, string>>
+  assert.equal(messages[0].content, 'Antworte auf Deutsch.')
+  assert.ok(messages[1].content.includes(CLOUD_INSTRUCTION_MARKER))
+  assert.equal(messages[2].role, 'user')
+})
+
+test('scoped cloud file writes survive large always-on connector catalogs', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: CONNECTORS },
+    patch({
+      selection: {
+        mode: 'cloud',
+        repoFullName: 'example/site',
+        branch: 'main',
+        terminalId: 'desktop-gh-site'
+      }
+    })
+  )
+  const names = (out.tool_ids as string[])
+    .flatMap((id) =>
+      id === 'server:desktop-workspace-desktop-gh-site'
+        ? ['list_files', 'read_file', 'write_file']
+        : Array.from({ length: 200 }, (_, i) => id + '_' + i)
+    )
+    .slice(0, 128)
+  for (const name of ['list_files', 'read_file', 'write_file']) assert.ok(names.includes(name))
+})
+
+test('switching workspace mid-chat does not stack instructions', () => {
+  const first = applyWorkspaceToPayload(
+    { messages: userTurn() },
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' } })
+  )
+  const second = applyWorkspaceToPayload(
+    first,
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/second-project', branch: 'release' } })
+  )
+
+  const messages = second.messages as Array<Record<string, string>>
+  const instructions = messages.filter((m) => m.content?.includes(CLOUD_INSTRUCTION_MARKER))
+  assert.equal(instructions.length, 1)
+  assert.ok(instructions[0].content.includes('example/second-project'))
+  assert.ok(!instructions[0].content.includes('test1'))
+})
+
+test('switching from cloud back to local removes the instruction', () => {
+  const cloud = applyWorkspaceToPayload(
+    { messages: userTurn() },
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' } })
+  )
+  const local = applyWorkspaceToPayload(
+    cloud,
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-abc123' } })
+  )
+
+  const messages = local.messages as Array<Record<string, string>>
+  assert.ok(!messages.some((m) => m.content?.includes(CLOUD_INSTRUCTION_MARKER)))
+  assert.equal(local.terminal_id, 'desktop-ws-abc123')
+})
+
+test('clearing the workspace removes the instruction and leaves the chat intact', () => {
+  const cloud = applyWorkspaceToPayload(
+    { messages: userTurn() },
+    patch({ selection: { mode: 'cloud', repoFullName: 'example/first-project', branch: 'main' } })
+  )
+  const cleared = applyWorkspaceToPayload(cloud, patch({ selection: null }))
+
+  assert.deepEqual(cleared.messages, userTurn())
+})
+
+
+test('a request without a workspace is left alone apart from the connectors', () => {
+  const body = { messages: userTurn(), model: 'code', stream: true }
+  const out = applyWorkspaceToPayload(body, patch())
+
+  assert.equal(out.model, 'code')
+  assert.equal(out.stream, true)
+  assert.deepEqual(out.messages, userTurn())
+})
+
+test('the original body is not mutated', () => {
+  const body: Record<string, unknown> = { messages: userTurn(), tool_ids: ['mine'] }
+  applyWorkspaceToPayload(body, patch({ selection: { mode: 'local', terminalId: 'x' } }))
+
+  assert.deepEqual(body.tool_ids, ['mine'])
+  assert.ok(!('terminal_id' in body))
+})
+
+test('a malformed body is returned untouched instead of throwing', () => {
+  assert.equal(applyWorkspaceToPayload(null as never, patch()), null)
+})
+
+test('the injected source is self-contained so it survives toString injection', () => {
+  const source = applyWorkspaceToPayload.toString()
+
+  // The function is shipped into the Open WebUI page as text; a reference to an
+  // import or module-scope constant would throw there but not here.
+  assert.ok(!/CLOUD_INSTRUCTION_MARKER/.test(source))
+  assert.ok(!/\brequire\(/.test(source))
+  assert.ok(source.startsWith('function applyWorkspaceToPayload'))
+})
+
+test('compact GitHub tools precede large connector catalogs in every chat', () => {
+  const github = 'server:desktop-github-cli-github-existing'
+  for (const selection of [
+    null,
+    { mode: 'cloud' as const, terminalId: 'desktop-gh-test', repoFullName: 'o/r', branch: 'main' }
+  ]) {
+    const out = applyWorkspaceToPayload(
+      { messages: userTurn(), tool_ids: ['garmin'] },
+      { selection, alwaysOnToolIds: ['garmin', github] }
+    )
+    const ids = out.tool_ids as string[]
+    assert.ok(ids.indexOf(github) < ids.indexOf('garmin'))
+    const functions = ids
+      .flatMap((id) =>
+        id === github
+          ? ['github_api_read', 'github_actions_logs']
+          : id.includes('workspace')
+            ? ['read_file', 'write_file']
+            : Array.from({ length: 200 }, (_, i) => 'garmin_' + i)
+      )
+      .slice(0, 128)
+    assert.ok(functions.includes('github_api_read'))
+    assert.ok(functions.includes('github_actions_logs'))
+  }
+})

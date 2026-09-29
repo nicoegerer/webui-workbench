@@ -11,14 +11,12 @@
   let installError = $state('')
   let videoElement: HTMLVideoElement
 
-  // Extract available GB from appState like 'insufficient-storage:2.3'
   const availableGB = $derived(
     $appState?.startsWith('insufficient-storage:')
       ? $appState.split(':')[1]
       : null
   )
 
-  // Extract error message from appState like 'install-failed:message'
   const installFailedMsg = $derived(
     $appState?.startsWith('install-failed:')
       ? $appState.substring('install-failed:'.length)
@@ -38,7 +36,6 @@
       return
     }
 
-    // Enough space now — proceed with Python install
     appState.set('initializing')
     try {
       await api.installPython()
@@ -58,7 +55,6 @@
 
 {#if visible}
   <div class="h-full w-full relative overflow-hidden bg-[#f5f5f7] dark:bg-[#0a0a0a]" in:fade={{ duration: 500 }}>
-    <!-- Video background -->
     <div class="absolute inset-0 overflow-hidden">
       <video
         bind:this={videoElement}

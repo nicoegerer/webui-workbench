@@ -89,7 +89,6 @@
   in:fly={{ y: 60, duration: 200 }}
   out:fly={{ y: 60, duration: 150 }}
 >
-  <!-- Resize edge -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="h-0 shrink-0 cursor-ns-resize relative"
@@ -106,7 +105,6 @@
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="flex items-center gap-0.5" onclick={(e) => e.stopPropagation()}>
-      <!-- Stop button (Open Terminal / llama.cpp only) -->
       {#if onStop && serviceReady}
         <button
           class="p-1 rounded-md hover:bg-white/[0.08] transition bg-transparent border-none cursor-pointer {stopping ? 'opacity-30 pointer-events-none' : 'opacity-40 hover:opacity-80'} text-white"
@@ -131,7 +129,6 @@
           {/if}
         </button>
       {/if}
-      <!-- Copy button -->
       <button
         class="p-1 rounded-md opacity-40 hover:opacity-80 hover:bg-white/[0.08] transition bg-transparent border-none text-white cursor-pointer"
         onclick={copyLogs}
@@ -145,7 +142,6 @@
           {/if}
         </svg>
       </button>
-      <!-- Refresh button -->
       <button
         class="p-1 rounded-md opacity-40 hover:opacity-80 hover:bg-white/[0.08] transition bg-transparent border-none text-white cursor-pointer"
         onclick={() => { disconnectPty(); refreshKey++ }}
@@ -155,7 +151,6 @@
           <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M20.015 4.356v4.992m0 0h-4.992m4.993 0l-3.181-3.183a8.25 8.25 0 00-13.803 3.7" />
         </svg>
       </button>
-      <!-- Close button -->
       <button
         class="p-1 rounded-md opacity-40 hover:opacity-80 hover:bg-white/[0.08] transition bg-transparent border-none text-white cursor-pointer"
         onclick={onClose}
@@ -168,7 +163,6 @@
     </div>
   </div>
 
-  <!-- Log content -->
   <div class="flex-1 min-h-0 relative overflow-hidden">
     {#if serviceReady}
       {#key `${activeLog}-${refreshKey}`}

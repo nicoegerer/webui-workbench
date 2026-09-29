@@ -122,7 +122,6 @@
   </div>
 {:else}
 <div class="flex flex-col divide-y divide-white/[0.04]">
-  <!-- Server status & controls -->
   <div class="py-4">
     <div class="flex items-center justify-between mb-3">
       <div>
@@ -213,7 +212,6 @@
     </div>
   </div>
 
-  <!-- Running Instance Info -->
   {#if isRunning}
     <div class="py-4">
       <div class="text-[13px] opacity-70 mb-3">{$i18n.t('settings.openwebui.runningInstance')}</div>
@@ -288,7 +286,6 @@
     />
   </div>
 
-  <!-- Version Pin -->
   <div class="py-4 flex items-center justify-between">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.openwebui.version')}</div>
@@ -335,7 +332,6 @@
     </div>
   </div>
 
-  <!-- Uninstall -->
   <div class="py-4 flex items-center justify-between">
     <div>
       <div class="text-[13px] opacity-70">{$i18n.t('settings.openwebui.uninstall')}</div>

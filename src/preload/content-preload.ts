@@ -1,36 +1,34 @@
 import { ipcRenderer, contextBridge } from 'electron'
 
-// ─── Desktop ↔ Open WebUI Generic Protocol ──────────────
-// This preload is a dumb relay. It passes typed {type, data}
-// messages between the embedder (desktop renderer) and the
-// Open WebUI page. Business logic lives elsewhere.
-// To add new features, just add new event types — this file
-// never needs to change.
+// Relay typed {type, data} messages between desktop and guest; keep business logic outside this preload.
 
 type EventCallback = (data: any) => void
 const eventCallbacks: EventCallback[] = []
+const pendingEvents: any[] = []
+const MAX_PENDING_EVENTS = 50
 
-// Embedder → Guest (push events from desktop)
 ipcRenderer.on('desktop:event', (_event, data) => {
+  if (eventCallbacks.length === 0) {
+    pendingEvents.push(data)
+    if (pendingEvents.length > MAX_PENDING_EVENTS) pendingEvents.shift()
+    return
+  }
   eventCallbacks.forEach((cb) => cb(data))
 })
 
-// ─── Theme Sync: Open WebUI → Desktop ───────────────────
-// Open WebUI calls window.applyTheme() after every theme change.
-// We inject this hook so the desktop shell can mirror the theme.
+// Mirror Open WebUI theme changes through its applyTheme hook.
 contextBridge.exposeInMainWorld('applyTheme', () => {
   const theme = localStorage.getItem('theme') ?? 'system'
   ipcRenderer.sendToHost('webview:event', { type: 'theme:update', data: { theme } })
 })
 
-// Expose to the Open WebUI page via contextBridge (secure, unforgeable)
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Push events: desktop → Open WebUI
   onEvent: (callback: EventCallback): void => {
     eventCallbacks.push(callback)
+    const queued = pendingEvents.splice(0)
+    queued.forEach((event) => callback(event))
   },
 
-  // Request/Response: Open WebUI → desktop
   send: (data: any): Promise<any> => {
     return new Promise((resolve) => {
       const id = Math.random().toString(36).slice(2)
@@ -45,7 +43,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     })
   },
 
-  // Navigation: Open WebUI → desktop
   load: (page: string): void => {
     ipcRenderer.sendToHost('webview:load', page)
   }
