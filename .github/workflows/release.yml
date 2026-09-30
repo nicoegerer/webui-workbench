@@ -111,7 +111,7 @@ jobs:
                   $env:OPEN_WEBUI_FRONTEND = Join-Path $env:RUNNER_TEMP 'workspace-frontend'
                   python .github/scripts/check-runtime-contract.py --frontend-output $env:OPEN_WEBUI_FRONTEND
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                  node --experimental-strip-types --test tests/workspace-switch.browser.mts tests/settings-locales.browser.mts
+                  node --experimental-strip-types --test tests/workspace-switch.browser.mts tests/settings-locales.browser.mts tests/service-settings.browser.mts
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
             - name: Download Compiled Output

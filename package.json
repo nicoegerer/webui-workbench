@@ -1,6 +1,6 @@
 {
   "name": "webui-workbench",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "AGPL-3.0",
   "description": "Community fork of Open WebUI Desktop with optional connectors and local or GitHub workspaces",
   "main": "./out/main/index.js",
@@ -19,7 +19,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "svelte-check": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "npm run typecheck:node && npm run svelte-check",
-    "test:ipc": "node --experimental-strip-types --test tests/open-terminal.test.mts tests/ipc-serialization.test.mts tests/tool-servers.test.mts tests/chat-payload.test.mts tests/workspace-chip.test.mts tests/terminal-store-bridge.test.mts tests/workspace-frontend.test.mts tests/github-contents.test.mts tests/github-write.test.mts tests/github-workspace-actions.test.mts tests/github-workspace-ipc.test.mts tests/github-fs.test.mts tests/github-cli.test.mts tests/github-preview.test.mts tests/workspace-lifecycle.test.mts tests/services-defaults.test.mts tests/runtime-update.test.mts tests/desktop-updater.test.mts tests/upstream-sync.test.mjs tests/release-assets.test.mjs tests/workspace-preview.test.mts tests/workspace-preview-ipc.test.mts tests/connector-catalog.test.mts",
+    "test:ipc": "node --experimental-strip-types --test tests/open-terminal.test.mts tests/ipc-serialization.test.mts tests/tool-servers.test.mts tests/chat-payload.test.mts tests/workspace-chip.test.mts tests/terminal-store-bridge.test.mts tests/workspace-frontend.test.mts tests/github-contents.test.mts tests/github-write.test.mts tests/github-workspace-actions.test.mts tests/github-workspace-ipc.test.mts tests/github-fs.test.mts tests/github-cli.test.mts tests/github-preview.test.mts tests/workspace-lifecycle.test.mts tests/services-defaults.test.mts tests/runtime-update.test.mts tests/desktop-updater.test.mts tests/upstream-sync.test.mjs tests/release-assets.test.mjs tests/workspace-preview.test.mts tests/workspace-preview-ipc.test.mts tests/connector-catalog.test.mts tests/managed-services-startup.test.mts tests/llamacpp.test.mts",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "node .github/scripts/check-public-distribution.mjs && npm run typecheck && electron-vite build && node .github/scripts/check-built-workspace.mjs",

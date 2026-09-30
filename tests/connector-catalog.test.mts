@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { connectorPayload } from '../src/renderer/src/lib/components/Main/Settings/Services/connector-payload.ts'
+import {
+  changeConnectorType,
+  connectorPayload
+} from '../src/renderer/src/lib/components/Main/Settings/Services/connector-payload.ts'
 import type { ManagedServiceDefinition } from '../src/shared/services/types.ts'
 import {
   connectorCatalog,
@@ -8,6 +11,68 @@ import {
   connectorStatus,
   searchConnectors
 } from '../src/renderer/src/lib/components/Main/Settings/Services/connector-catalog.ts'
+
+test('an unsaved MCP draft converts directly to its underlying local process without a preview ID', () => {
+  const original: ManagedServiceDefinition = {
+    id: '',
+    name: 'Model gateway',
+    type: 'mcpo',
+    command: 'uvx',
+    args: ['mcpo'],
+    enabled: true,
+    autoRestart: true,
+    restartLimit: 3,
+    startupTimeoutMs: 120000,
+    env: { HOST: '127.0.0.1' },
+    cwd: 'C:/workspace',
+    apiKey: 'adapter-only',
+    healthCheckUrl: 'http://127.0.0.1:8001/docs',
+    mcpo: { serverCommand: 'C:/Program Files/nodejs/node.exe', serverArgs: [], port: 8001 }
+  }
+  const before = structuredClone(original)
+  const local = changeConnectorType(original, 'generic', 'C:/tools/server.mjs\r\n--no-open\n')
+  assert.equal(local.type, 'generic')
+  assert.equal(local.command, original.mcpo!.serverCommand)
+  assert.deepEqual(local.args, ['C:/tools/server.mjs', '--no-open'])
+  for (const key of ['mcpo', 'remote', 'apiKey', 'accessToken', 'healthCheckUrl']) {
+    assert.equal(local[key], undefined)
+  }
+  assert.equal(local.id, '')
+  assert.equal(local.cwd, original.cwd)
+  assert.deepEqual(local.env, original.env)
+  assert.equal(connectorPayload(local, local.args.join('\n'), []).id, undefined)
+  assert.deepEqual(original, before)
+})
+
+test('type changes preserve existing identity and do not retain endpoint credentials', () => {
+  const original: ManagedServiceDefinition = {
+    id: 'fixture',
+    name: 'Fixture',
+    type: 'generic',
+    command: 'fixture',
+    args: ['--stdio'],
+    enabled: false,
+    autoRestart: false,
+    restartLimit: 2,
+    startupTimeoutMs: 9000,
+    env: {}
+  }
+  const mcp = changeConnectorType(original, 'mcpo', '--stdio', 8123)
+  assert.equal(mcp.id, original.id)
+  assert.equal(mcp.enabled, false)
+  assert.equal(mcp.mcpo?.serverCommand, 'fixture')
+  assert.equal(mcp.mcpo?.port, 8123)
+  assert.deepEqual(mcp.mcpo?.serverArgs, ['--stdio'])
+  const local = changeConnectorType(mcp, 'generic', '--stdio')
+  assert.equal(local.command, 'fixture')
+  assert.equal(local.id, original.id)
+  const remote = changeConnectorType(local, 'remote', '--stdio')
+  assert.equal(remote.command, '')
+  assert.deepEqual(remote.args, [])
+  assert.deepEqual(remote.remote, { url: '' })
+  assert.equal(remote.mcpo, undefined)
+  assert.equal(changeConnectorType(remote, 'remote', ''), remote)
+})
 
 test('Google discovery is explicitly preview setup, not an automatically authorized connection', () => {
   const google = connectorCatalog.filter((entry) => entry.setup === 'google')

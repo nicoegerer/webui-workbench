@@ -63,7 +63,7 @@ export const registerManagedServicesIpc = (
       case 'remove':
         return manager.remove(requireId(request))
       case 'start':
-        return manager.start(requireId(request))
+        return manager.requestStart(requireId(request))
       case 'stop':
         return manager.stop(requireId(request))
       case 'logs':

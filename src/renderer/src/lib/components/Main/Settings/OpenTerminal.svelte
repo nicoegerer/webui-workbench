@@ -49,10 +49,16 @@
   )
 
   const updateOtConfig = async (key: string, value: any) => {
-    const current = $config ?? {}
-    const openTerminal = { ...(current.openTerminal ?? {}), [key]: value }
-    await window.electronAPI.setConfig({ openTerminal })
-    config.set(await window.electronAPI.getConfig())
+    actionError = ''
+    try {
+      const current = $config ?? {}
+      const openTerminal = { ...(current.openTerminal ?? {}), [key]: value }
+      await window.electronAPI.setConfig({ openTerminal })
+      config.set(await window.electronAPI.getConfig())
+      if (key === 'enabled' && value === true && !isRunning && !starting) await startTerminal()
+    } catch (e) {
+      actionError = e instanceof Error ? e.message : String(e)
+    }
   }
 
   const stopTerminal = async () => {
@@ -77,6 +83,7 @@
       const result = await window.electronAPI.startOpenTerminal()
       if (!result?.url) throw new Error(l('Start fehlgeschlagen.', 'Start failed.'))
       otInfo = await window.electronAPI.getOpenTerminalInfo()
+      version = await window.electronAPI.getPackageVersion('open-terminal')
     } catch (e) {
       console.error('Failed to start Open Terminal:', e)
       actionError = e instanceof Error ? e.message : String(e)

@@ -8,17 +8,10 @@ import * as tar from 'tar'
 import * as pty from 'node-pty'
 import log from 'electron-log'
 
-import {
-  getConfig,
-  setConfig,
-  getInstallDir,
-  portInUse,
-  downloadFileWithProgress
-} from './index'
+import { getConfig, setConfig, getInstallDir, portInUse, downloadFileWithProgress } from './index'
 
 import { getModelsDir } from './huggingface'
 import { ServiceLock, isProcessAlive } from './service-lock'
-
 
 let ptyProcess: pty.IPty | null = null
 let pid: number | null = null
@@ -28,7 +21,9 @@ let logBuffer: string[] = []
 
 const lock = new ServiceLock('llamacpp')
 let binaryPath: string | null = null
-
+let startInFlight: Promise<{ url: string; pid: number }> | null = null
+let stopInFlight: Promise<void> | null = null
+let lifecycle = 0
 
 export const getLlamaCppInfo = () => {
   // Lazily discover a cached binary on cold boot so the UI never falsely
@@ -37,7 +32,8 @@ export const getLlamaCppInfo = () => {
     const cacheBase = path.join(getInstallDir(), 'llama.cpp')
     try {
       if (fs.existsSync(cacheBase)) {
-        const dirs = fs.readdirSync(cacheBase, { withFileTypes: true })
+        const dirs = fs
+          .readdirSync(cacheBase, { withFileTypes: true })
           .filter((d) => d.isDirectory())
         for (const d of dirs) {
           const found = findBinary(path.join(cacheBase, d.name))
@@ -66,7 +62,6 @@ export const getLlamaCppInfo = () => {
 
 export const getLlamaCppPty = (): pty.IPty | null => ptyProcess
 export const getLlamaCppLog = (): string[] => logBuffer
-
 
 interface ReleaseAsset {
   name: string
@@ -189,10 +184,7 @@ const findBinary = (dir: string): string | null => {
   return null
 }
 
-
-export const setupLlamaCpp = async (
-  onStatus?: (status: string) => void
-): Promise<string> => {
+export const setupLlamaCpp = async (onStatus?: (status: string) => void): Promise<string> => {
   const config = await getConfig()
   const llamaConfig = config.llamaCpp ?? {}
   const version = llamaConfig.version || 'latest'
@@ -215,7 +207,8 @@ export const setupLlamaCpp = async (
     }
   } else {
     try {
-      const cachedVersions = fs.readdirSync(cacheBase, { withFileTypes: true })
+      const cachedVersions = fs
+        .readdirSync(cacheBase, { withFileTypes: true })
         .filter((d) => d.isDirectory())
         .map((d) => d.name)
 
@@ -258,8 +251,8 @@ export const setupLlamaCpp = async (
     }
     throw new Error(
       `Failed to fetch release info (no internet?) and no cached llama.cpp binary found. ` +
-      `Please connect to the internet for the initial llama.cpp installation. ` +
-      `Original error: ${error?.message ?? error}`
+        `Please connect to the internet for the initial llama.cpp installation. ` +
+        `Original error: ${error?.message ?? error}`
     )
   }
 
@@ -282,9 +275,7 @@ export const setupLlamaCpp = async (
   const asset = (releaseData.assets as ReleaseAsset[]).find((a) => a.name === pattern)
   if (!asset) {
     const available = (releaseData.assets as ReleaseAsset[]).map((a) => a.name).join(', ')
-    throw new Error(
-      `No matching asset found for pattern "${pattern}". Available: ${available}`
-    )
+    throw new Error(`No matching asset found for pattern "${pattern}". Available: ${available}`)
   }
 
   log.info(`Downloading asset: ${asset.name}`)
@@ -341,45 +332,58 @@ export const setupLlamaCpp = async (
   return resultBinary
 }
 
-export const checkLlamaCppUpdate = async (): Promise<{ currentVersion: string | null; latestVersion: string | null; updateAvailable: boolean }> => {
+export const checkLlamaCppUpdate = async (): Promise<{
+  currentVersion: string | null
+  latestVersion: string | null
+  updateAvailable: boolean
+}> => {
   const currentInfo = getLlamaCppInfo()
 
   try {
-    const response = await fetch('https://api.github.com/repos/ggml-org/llama.cpp/releases/latest', {
-      headers: { Accept: 'application/vnd.github.v3+json' },
-      signal: AbortSignal.timeout(5000)
-    })
-    
+    const response = await fetch(
+      'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest',
+      {
+        headers: { Accept: 'application/vnd.github.v3+json' },
+        signal: AbortSignal.timeout(5000)
+      }
+    )
+
     if (!response.ok) {
       throw new Error(`GitHub API returned ${response.status}: ${response.statusText}`)
     }
-    
+
     const releaseData = await response.json()
     const latestVersion = releaseData.tag_name
     const currentVersion = currentInfo.version
-    
+
     if (!currentVersion) {
       return { currentVersion: null, latestVersion, updateAvailable: true }
     }
-    
-    return { 
-      currentVersion, 
-      latestVersion, 
-      updateAvailable: currentVersion !== latestVersion 
+
+    return {
+      currentVersion,
+      latestVersion,
+      updateAvailable: currentVersion !== latestVersion
     }
   } catch (error) {
     log.error('Failed to check for llama.cpp updates:', error)
-    return { 
-      currentVersion: currentInfo.version, 
-      latestVersion: null, 
-      updateAvailable: false 
+    return {
+      currentVersion: currentInfo.version,
+      latestVersion: null,
+      updateAvailable: false
     }
   }
 }
 
 export const updateLlamaCpp = async (
   onStatus?: (status: string) => void
-): Promise<{ url?: string; status?: string; pid?: number; binaryPath?: string; version?: string | null }> => {
+): Promise<{
+  url?: string
+  status?: string
+  pid?: number
+  binaryPath?: string
+  version?: string | null
+}> => {
   // Verify network availability before deleting the installed binary.
   onStatus?.('Checking for updates…')
   let releaseTag: string
@@ -399,12 +403,12 @@ export const updateLlamaCpp = async (
   } catch (error) {
     throw new Error(
       `Cannot update llama.cpp: unable to reach GitHub. ` +
-      `Please check your internet connection. (${error?.message ?? error})`
+        `Please check your internet connection. (${error?.message ?? error})`
     )
   }
 
   await stopLlamaCpp()
-  
+
   const currentInfo = getLlamaCppInfo()
   if (currentInfo.version) {
     const cacheDir = path.join(getInstallDir(), 'llama.cpp', currentInfo.version)
@@ -417,51 +421,92 @@ export const updateLlamaCpp = async (
       }
     }
   }
-  
+
   // Force latest for an explicit update, regardless of the saved version preference.
   const config = await getConfig()
   await setConfig({ llamaCpp: { ...config.llamaCpp, version: 'latest' } })
-  
+
   onStatus?.('Downloading update…')
   await setupLlamaCpp(onStatus)
-  
+
   return getLlamaCppInfo()
 }
-
 
 export const startLlamaCpp = async (
   onStatus?: (status: string) => void
 ): Promise<{ url: string; pid: number }> => {
-  if (!lock.acquire()) {
+  if (startInFlight) return startInFlight
+  if (!stopInFlight && status === 'started' && url && pid && isProcessAlive(pid))
     return { url, pid }
+  const generation = ++lifecycle
+  const start = (async () => {
+    await stopInFlight
+    if (generation !== lifecycle) throw new Error('llama.cpp startup was cancelled')
+    try {
+      return await startLlamaCppOnce(onStatus, generation)
+    } catch (error) {
+      if (generation === lifecycle) {
+        await stopLlamaCppProcess(false)
+        status = 'failed'
+      }
+      throw error
+    }
+  })()
+  startInFlight = start
+  try {
+    return await start
+  } finally {
+    if (startInFlight === start) startInFlight = null
   }
+}
 
-  await stopLlamaCpp()
+const startLlamaCppOnce = async (
+  onStatus: ((status: string) => void) | undefined,
+  generation: number
+): Promise<{ url: string; pid: number }> => {
+  const ensureActive = () => {
+    if (generation !== lifecycle) throw new Error('llama.cpp startup was cancelled')
+  }
+  await stopLlamaCppProcess()
+  ensureActive()
+  if (!lock.acquire()) throw new Error('llama.cpp is already starting')
 
   status = 'setting-up'
   onStatus?.('Setting up llama.cpp…')
 
   const binary = await setupLlamaCpp(onStatus)
+  ensureActive()
 
   status = 'starting'
   onStatus?.('Starting llama-server…')
 
   const config = await getConfig()
+  ensureActive()
   const llamaConfig = config.llamaCpp ?? {}
   const host = '127.0.0.1'
 
   let desiredPort = llamaConfig.port || 18881
   let availablePort = desiredPort
   while (await portInUse(availablePort, host)) {
+    ensureActive()
     availablePort++
     if (availablePort > desiredPort + 100) {
       throw new Error('No available port found for llama-server')
     }
   }
+  ensureActive()
 
   const extraArgs = llamaConfig.extraArgs ?? []
   const modelsDir = getModelsDir()
-  const commandArgs = ['--host', host, '--port', availablePort.toString(), '--models-dir', modelsDir, ...extraArgs]
+  const commandArgs = [
+    '--host',
+    host,
+    '--port',
+    availablePort.toString(),
+    '--models-dir',
+    modelsDir,
+    ...extraArgs
+  ]
 
   log.info('Starting llama-server:', binary, commandArgs.join(' '))
 
@@ -487,18 +532,21 @@ export const startLlamaCpp = async (
   pid = spawnedPid
 
   spawned.onData((data: string) => {
+    if (ptyProcess !== spawned) return
     logBuffer.push(data)
     log.info(`[llamacpp:${spawnedPid}] ${data.replace(/[\r\n]+/g, ' ').trim()}`)
   })
 
   spawned.onExit(({ exitCode, signal }) => {
+    if (ptyProcess !== spawned) return
     log.info(`[llamacpp:${spawnedPid}] Exited code=${exitCode} signal=${signal}`)
     const exitMsg = `\r\n[Process exited with code ${exitCode}${signal ? ` signal ${signal}` : ''}]\r\n`
     logBuffer.push(exitMsg)
     ptyProcess = null
     pid = null
     url = null
-    status = 'stopped'
+    status = generation === lifecycle ? 'failed' : 'stopped'
+    lock.release()
   })
 
   const serverUrl = `http://${host}:${availablePort}`
@@ -506,6 +554,10 @@ export const startLlamaCpp = async (
   let ready = false
 
   for (let i = 0; i < maxAttempts; i++) {
+    ensureActive()
+    if (ptyProcess !== spawned || !isProcessAlive(spawnedPid)) {
+      throw new Error('llama-server exited during startup. Check the service log.')
+    }
     await new Promise((r) => setTimeout(r, 1000))
     try {
       const resp = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(2000) })
@@ -521,8 +573,14 @@ export const startLlamaCpp = async (
     }
   }
 
+  ensureActive()
+  if (ptyProcess !== spawned || !isProcessAlive(spawnedPid)) {
+    throw new Error('llama-server exited during startup. Check the service log.')
+  }
   if (!ready) {
-    log.warn('llama-server did not report healthy within 30s, continuing anyway')
+    throw new Error(
+      'llama-server did not become ready. Check the service log and model configuration.'
+    )
   }
 
   url = serverUrl
@@ -533,27 +591,42 @@ export const startLlamaCpp = async (
 }
 
 export const stopLlamaCpp = async (): Promise<void> => {
-  if (ptyProcess) {
+  lifecycle += 1
+  if (stopInFlight) return stopInFlight
+  const stopping = stopLlamaCppProcess()
+  stopInFlight = stopping
+  try {
+    await stopping
+  } finally {
+    if (stopInFlight === stopping) stopInFlight = null
+  }
+}
+
+const stopLlamaCppProcess = async (clearLogs = true): Promise<void> => {
+  const child = ptyProcess
+  const childPid = child?.pid
+  if (child) {
     try {
-      ptyProcess.kill()
+      child.kill()
     } catch (e) {
       log.warn('Failed to kill llama-server PTY:', e)
     }
     await new Promise((r) => setTimeout(r, 2000))
-    if (pid) {
+    if (childPid) {
       try {
-        process.kill(pid, 0)
-        process.kill(pid, 'SIGKILL')
+        process.kill(childPid, 0)
+        process.kill(childPid, 'SIGKILL')
       } catch {
         // already dead
       }
     }
   }
+  if (ptyProcess && ptyProcess !== child) return
   ptyProcess = null
   pid = null
   url = null
   status = null
-  logBuffer = []
+  if (clearLogs) logBuffer = []
   lock.release()
 }
 
@@ -561,7 +634,9 @@ export const validateLlamaCppProcess = (): boolean => {
   if (!pid) return false
   if (isProcessAlive(pid)) return true
   pid = null
-  status = null
+  ptyProcess = null
+  url = null
+  status = 'failed'
   lock.release()
   return false
 }

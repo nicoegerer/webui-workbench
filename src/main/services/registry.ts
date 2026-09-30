@@ -107,7 +107,8 @@ export const normalizeServiceDefinition = (
   if (!isRecord(value)) throw new Error('Service must be an object')
 
   const name = asString(value.name, 'name')
-  const idValue = forcedId ?? (typeof value.id === 'string' ? value.id : createId(name))
+  const idValue =
+    forcedId ?? (typeof value.id === 'string' && value.id.trim() ? value.id : createId(name))
   const id = asString(idValue, 'id').toLowerCase()
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) {
     throw new Error('id may only contain letters, numbers, dots, underscores, and hyphens')

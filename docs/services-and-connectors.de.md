@@ -6,15 +6,15 @@ WebUI Workbench enthält **keine voreingerichteten Konten, MCPs oder Modellanbie
 
 ## 1. Was möchtest du verbinden?
 
-| Vorhandener Dienst | Richtige Einstellung | Ergebnis |
-| --- | --- | --- |
-| Open-WebUI-Server | Äußere Desktop-Verbindungen | Öffnet diesen Chat-Server; richtet keine Modelle oder Werkzeuge ein |
-| OpenAI-kompatible Modell-API oder Gateway | Open WebUI → Administrator-Einstellungen → Verbindungen | Stellt Chat-Modelle bereit; API-Basisadresse des Anbieters verwenden, häufig mit `/v1` |
-| Lokaler MCP mit Startbefehl und **stdio** | Desktop → Einstellungen → Dienste & Konnektoren → Entdecken → Lokaler Konnektor | Startet den MCP über den lokalen Adapter |
-| Vorhandene **Streamable-HTTP-MCP**-Adresse | Benutzerdefinierter Remote-Konnektor / Remote-MCP | Verbindet den Werkzeug-Endpunkt ohne lokale Serverinstallation |
-| Normales Hintergrundprogramm | Erweitert hinzufügen → Lokaler Prozess | Startet und überwacht einen Prozess; macht daraus nicht automatisch Werkzeuge |
-| Lokale Projektdateien und Shell | Desktop → Open Terminal; Projektordner neben dem Eingabefeld auswählen | Dateizugriff im echten lokalen Ordner |
-| GitHub-Repository | [Arbeitsbereiche und GitHub-Zugriff](workspaces-and-preview.md#github-access) | Dateien im gewählten Branch lesen/schreiben; Schreiben erzeugt Commits, kein Cloud-Terminal |
+| Vorhandener Dienst                         | Richtige Einstellung                                                            | Ergebnis                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Open-WebUI-Server                          | Äußere Desktop-Verbindungen                                                     | Öffnet diesen Chat-Server; richtet keine Modelle oder Werkzeuge ein                         |
+| OpenAI-kompatible Modell-API oder Gateway  | Open WebUI → Administrator-Einstellungen → Verbindungen                         | Stellt Chat-Modelle bereit; API-Basisadresse des Anbieters verwenden, häufig mit `/v1`      |
+| Lokaler MCP mit Startbefehl und **stdio**  | Desktop → Einstellungen → Dienste & Konnektoren → Entdecken → Lokaler Konnektor | Startet den MCP über den lokalen Adapter                                                    |
+| Vorhandene **Streamable-HTTP-MCP**-Adresse | Benutzerdefinierter Remote-Konnektor / Remote-MCP                               | Verbindet den Werkzeug-Endpunkt ohne lokale Serverinstallation                              |
+| Normales Hintergrundprogramm               | Erweitert hinzufügen → Lokaler Prozess                                          | Startet und überwacht einen Prozess; macht daraus nicht automatisch Werkzeuge               |
+| Lokale Projektdateien und Shell            | Desktop → Open Terminal; Projektordner neben dem Eingabefeld auswählen          | Dateizugriff im echten lokalen Ordner                                                       |
+| GitHub-Repository                          | [Arbeitsbereiche und GitHub-Zugriff](workspaces-and-preview.md#github-access)   | Dateien im gewählten Branch lesen/schreiben; Schreiben erzeugt Commits, kein Cloud-Terminal |
 
 Die äußeren Desktop-Einstellungen und die Einstellungen innerhalb von Open WebUI sind zwei Ebenen. Ein Modell-Gateway gehört zu den **Modell-Verbindungen**, nicht in die MCP-Werkzeugliste. Du kannst seinen Prozess zusätzlich vom Desktop verwalten lassen.
 
@@ -28,18 +28,18 @@ Lokale MCP-Server nutzen unabhängig vom Anbieter denselben allgemeinen Anschlus
 
 Unter **Lokaler Konnektor** überträgst du den vom Server-Autor angegebenen stdio-Startbefehl in die Felder:
 
-| Feld | Bedeutung |
-| --- | --- |
-| Name | Frei wählbare Bezeichnung; beeinflusst den technischen Anschluss nicht |
-| Serverprogramm | Nur die ausführbare Datei; bei Suchproblemen ihr vollständiger Pfad |
-| Argumente, eines pro Zeile | Jedes Argument einzeln in derselben Reihenfolge; das Serverprogramm nicht wiederholen |
-| In Chats verwenden und automatisch starten | Globale Freigabe: Verbindung starten und Werkzeuge allen Chats anbieten |
-| Erweitert → Lokaler Port | Freier Port des Adapters, nicht des stdio-Unterprozesses |
-| Adapterprogramm | `uvx` oder dessen vollständiger Pfad; unabhängig vom Serverprogramm |
-| Arbeitsverzeichnis | Optionales Startverzeichnis des Prozesses; nicht der Arbeitsbereich des Chats |
-| Umgebungsvariablen | Vom Anbieter geforderte Werte; Geheimnisse hier statt in Argumenten hinterlegen |
-| Status-URL | Optionaler, tatsächlich unterstützter Prüf-Endpunkt; nicht jeder Dienst hat `/health` |
-| Startzeitlimit / Neustarts | Zeit für den ersten Start lassen; vor mehr Wiederholungen die Fehlerursache prüfen |
+| Feld                                       | Bedeutung                                                                             |
+| ------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Name                                       | Frei wählbare Bezeichnung; beeinflusst den technischen Anschluss nicht                |
+| Serverprogramm                             | Nur die ausführbare Datei; bei Suchproblemen ihr vollständiger Pfad                   |
+| Argumente, eines pro Zeile                 | Jedes Argument einzeln in derselben Reihenfolge; das Serverprogramm nicht wiederholen |
+| In Chats verwenden und automatisch starten | Globale Freigabe: Verbindung starten und Werkzeuge allen Chats anbieten               |
+| Erweitert → Lokaler Port                   | Freier Port des Adapters, nicht des stdio-Unterprozesses                              |
+| Adapterprogramm                            | `uvx` oder dessen vollständiger Pfad; unabhängig vom Serverprogramm                   |
+| Arbeitsverzeichnis                         | Optionales Startverzeichnis des Prozesses; nicht der Arbeitsbereich des Chats         |
+| Umgebungsvariablen                         | Vom Anbieter geforderte Werte; Geheimnisse hier statt in Argumenten hinterlegen       |
+| Status-URL                                 | Optionaler, tatsächlich unterstützter Prüf-Endpunkt; nicht jeder Dienst hat `/health` |
+| Startzeitlimit / Neustarts                 | Zeit für den ersten Start lassen; vor mehr Wiederholungen die Fehlerursache prüfen    |
 
 Beispiel zum Aufteilen eines Befehls (**nur Platzhalter**, kein installierbarer Konnektor): Aus `python "C:\Tools\example-mcp\server.py" --transport stdio` wird Serverprogramm `python` und folgende drei Argumentzeilen:
 
@@ -79,7 +79,9 @@ Für rein lokale Nutzung Dienste an **`127.0.0.1`** binden. `0.0.0.0` ohne Authe
 
 ## 6. Open Terminal und echte Projektordner
 
-Öffne **Desktop-Einstellungen → Open Terminal → Installieren/Starten**. Bei Bedarf installiert die App ihre getestete Laufzeit. **Starten** hält den Dienst für diese Sitzung aktiv, auch wenn **Beim Start automatisch starten** aus ist. Dieser Schalter gilt für spätere App-Starts und bleibt bei neuen Installationen aus. **Stoppen** beendet die aktive Instanz.
+Öffne **Desktop-Einstellungen → Open Terminal → Installieren/Starten**. Bei Bedarf installiert die App ihre getestete Laufzeit. **Starten** hält den Dienst für diese Sitzung aktiv, auch wenn **Beim Start automatisch starten** aus ist. Einschalten startet ihn sofort und bei künftigen App-Starts; Ausschalten beendet keine laufende Sitzung. Bei neuen Installationen bleibt der Schalter aus. **Stoppen** beendet die aktive Instanz. Dasselbe gilt unter **Inferenz-Laufzeit → llama.cpp**; zum Chatten muss zusätzlich ein lokales Modell installiert und ausgewählt sein. Startfehler werden in den Einstellungen angezeigt und nicht als erfolgreiche Verbindung gemeldet.
+
+Wurde ein normales Programm versehentlich als MCP gespeichert, ändere unter **Dienste & Konnektoren → Deine → Verwalten → Erweitert → Verbindungstyp** auf **Lokaler Prozess** und speichere. Programm und Argumente bleiben erhalten, reine Adapter-Einstellungen werden entfernt. Der Dialog schließt sich beim Speichern; der Start läuft in der Dienstkarte weiter. Dort findest du Status, Protokoll und Stoppen. Wiederholte Startfehler enden spätestens am eingestellten Neustartlimit.
 
 Ohne eingestelltes Arbeitsverzeichnis nutzt der Dienst deinen Benutzerordner. Wähle für ein Projekt dessen echten Ordner am Arbeitsbereich-Knopf neben dem Nachrichteneingabefeld. Dabei startet die nötige Arbeitsbereich-Instanz automatisch. Ein Ordnerwechsel verschiebt keine Dateien. Nicht mehr benötigte Chat-Instanzen werden bereinigt; laufende Befehle, Terminalsitzungen und bewusst gestartete Dienste bleiben erhalten.
 
@@ -92,15 +94,15 @@ Lokale Befehle laufen mit deinen Benutzerrechten, **nicht in einer Sandbox**. Gi
 3. Eine harmlose, lesende Werkzeugaktion testen und den tatsächlichen Werkzeugaufruf prüfen. Eine normale Chat-Antwort allein reicht nicht.
 4. Für Dateien einen Wegwerf-Testordner auswählen, eine kleine Testdatei anlegen lassen und **Dateien** sowie den vollständigen Pfad kontrollieren.
 
-| Problem | Zuerst prüfen |
-| --- | --- |
-| Programm nicht gefunden | Voraussetzung installieren oder vollständigen Programmpfad verwenden; nach PATH-Änderungen Desktop neu starten |
-| Port belegt | Doppelten Dienst gezielt beenden oder anderen freien Adapter-Port verwenden |
-| Login-/MFA-Fehler | Außerhalb des Chats anmelden, Berechtigungen und Token-Ablauf prüfen |
-| Prozess endet sofort | Erste Fehlermeldung im Protokoll, Argumente, Laufzeitversion und Startordner |
-| Dienst läuft, Werkzeuge fehlen | Verbindungstyp, Administrator-Synchronisierung, Berechtigungen und werkzeugfähiges Modell |
+| Problem                                | Zuerst prüfen                                                                                                                |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Programm nicht gefunden                | Voraussetzung installieren oder vollständigen Programmpfad verwenden; nach PATH-Änderungen Desktop neu starten               |
+| Port belegt                            | Doppelten Dienst gezielt beenden oder anderen freien Adapter-Port verwenden                                                  |
+| Login-/MFA-Fehler                      | Außerhalb des Chats anmelden, Berechtigungen und Token-Ablauf prüfen                                                         |
+| Prozess endet sofort                   | Erste Fehlermeldung im Protokoll, Argumente, Laufzeitversion und Startordner                                                 |
+| Dienst läuft, Werkzeuge fehlen         | Verbindungstyp, Administrator-Synchronisierung, Berechtigungen und werkzeugfähiges Modell                                    |
 | Open Terminal stoppt direkt nach Start | Desktop aktualisieren; bis einschließlich `workbench.3` konnte die Bereinigung manuell gestartete Dienste irrtümlich stoppen |
-| Falscher Ordner / keine Vorschau | Aktuellen Arbeitsbereich und vollständigen Pfad prüfen; Arbeitsbereich-Anleitung beachten |
+| Falscher Ordner / keine Vorschau       | Aktuellen Arbeitsbereich und vollständigen Pfad prüfen; Arbeitsbereich-Anleitung beachten                                    |
 
 ## Zugriff verwalten und Konfiguration teilen
 

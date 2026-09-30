@@ -10,7 +10,7 @@
   import ManagedServiceLogs from '../../../../services/ManagedServiceLogs.svelte'
   import ConnectorDialog from './ConnectorDialog.svelte'
   import ConnectorIcon from './ConnectorIcon.svelte'
-  import { connectorPayload } from './connector-payload'
+  import { changeConnectorType, connectorPayload } from './connector-payload'
   import {
     connectorForService,
     connectorStatus,
@@ -30,6 +30,7 @@
   let busyIds = $state<string[]>([])
   let preparing = $state(false)
   let saving = $state(false)
+  let changingType = $state(false)
   let editorError = $state('')
   let draft = $state<ManagedServiceDefinition | null>(null)
   let argsText = $state('')
@@ -165,62 +166,24 @@
     await openAdd(provider.setup === 'mcpo' ? 'mcpo' : 'remote', provider)
   }
   async function changeType(type: ServiceType): Promise<void> {
-    if (!draft || type === draft.type) return
+    if (!draft || type === draft.type || changingType || saving) return
+    const previous = draft
+    changingType = true
+    editorError = ''
     try {
-      if (type === 'mcpo') {
-        const port = await window.electronAPI.suggestManagedServicePort()
-        draft = {
-          ...draft,
-          type,
-          mcpo: {
-            serverCommand: draft.command,
-            serverArgs: argsText.split(/\r?\n/).filter(Boolean),
-            port,
-            runnerCommand: 'uvx'
-          },
-          remote: undefined,
-          accessToken: undefined,
-          apiKey: ''
-        }
-      } else if (type === 'remote') {
-        draft = {
-          ...draft,
-          type,
-          command: '',
-          args: [],
-          mcpo: undefined,
-          apiKey: undefined,
-          remote: { url: '' },
-          accessToken: ''
-        }
-        argsText = ''
-      } else {
-        if (draft.type === 'mcpo') {
-          const preview = await window.electronAPI.previewManagedService(
-            toIpcPlainValue({
-              ...draft,
-              mcpo: { ...draft.mcpo!, serverArgs: argsText.split(/\r?\n/).filter(Boolean) }
-            })
-          )
-          draft = { ...preview, id: draft.id }
-          argsText = draft.args.join('\n')
-        }
-        draft = {
-          ...draft,
-          type,
-          mcpo: undefined,
-          remote: undefined,
-          apiKey: undefined,
-          accessToken: undefined
-        }
-      }
+      const port = type === 'mcpo' ? await window.electronAPI.suggestManagedServicePort() : 0
+      if (draft !== previous) return
+      draft = changeConnectorType(previous, type, argsText, port)
+      if (type === 'remote') argsText = ''
     } catch (cause) {
       editorError = message(cause)
+    } finally {
+      changingType = false
     }
   }
   async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault()
-    if (!draft || saving) return
+    if (!draft || saving || changingType) return
     editorError = ''
     if (!draft.name.trim()) {
       editorError = l('Gib einen Namen für die Verbindung ein.', 'Enter a name for the connection.')
@@ -821,7 +784,13 @@
           <label
             >{l('Verbindungstyp', 'Connection type')}<select
               value={draft.type}
-              onchange={(event) => changeType(event.currentTarget.value as ServiceType)}
+              disabled={saving || changingType}
+              onchange={(event) => {
+                const select = event.currentTarget
+                void changeType(select.value as ServiceType).finally(() => {
+                  if (draft) select.value = draft.type
+                })
+              }}
               ><option value="remote">{l('Remote-MCP (HTTP)', 'Remote MCP (HTTP)')}</option><option
                 value="mcpo">{l('Lokaler MCP-Server', 'Local MCP server')}</option
               ><option value="generic">{l('Lokaler Prozess', 'Local process')}</option></select

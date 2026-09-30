@@ -211,8 +211,18 @@ export class ManagedServicesManager {
     }
 
     this.emitRegistryChanged()
-    if (service.enabled) await this.start(service.id)
+    if (service.enabled) return this.requestStart(service.id)
     return this.snapshot(this.getRuntime(service.id))
+  }
+
+  requestStart(id: string): ManagedServiceSnapshot {
+    const runtime = this.getRuntime(id)
+    void this.start(id).catch((error) => {
+      if (this.runtimes.get(id) === runtime && !runtime.stopRequested && !this.shuttingDown) {
+        this.fail(runtime, errorMessage(error), false)
+      }
+    })
+    return this.snapshot(runtime)
   }
 
   async remove(id: string): Promise<boolean> {
@@ -239,11 +249,17 @@ export class ManagedServicesManager {
     if (runtime.status === 'starting' || runtime.status === 'running') return this.snapshot(runtime)
     if (this.shuttingDown) throw new Error('The app is shutting down')
 
+    if (runtime.restartTimer) {
+      clearTimeout(runtime.restartTimer)
+      runtime.restartTimer = null
+    }
     if (!automaticRestart) runtime.restartCount = 0
     runtime.stopRequested = false
     runtime.lastError = undefined
     runtime.generation += 1
     const generation = runtime.generation
+    const cancelled = () =>
+      runtime.generation !== generation || runtime.stopRequested || this.shuttingDown
     this.setStatus(runtime, 'starting')
 
     if (runtime.definition.type === 'remote' && runtime.definition.remote) {
@@ -269,7 +285,9 @@ export class ManagedServicesManager {
         }
       }
       runtime.logs.add(`Checking remote endpoint ${runtime.definition.remote.url}`)
-      if (await isHealthCheckReady(runtime.definition.remote.url)) {
+      const ready = await isHealthCheckReady(runtime.definition.remote.url)
+      if (cancelled()) return this.snapshot(runtime)
+      if (ready) {
         runtime.ownsProcess = false
         runtime.logs.add('Remote endpoint is reachable')
         this.setStatus(runtime, 'running')
@@ -282,21 +300,25 @@ export class ManagedServicesManager {
       runtime.definition.healthCheckUrl,
       runtime.definition.mcpo?.port
     )
-    if (port && (await isPortInUse(port))) {
+    const portBusy = port ? await isPortInUse(port) : false
+    if (cancelled()) return this.snapshot(runtime)
+    if (portBusy) {
       const ready = runtime.definition.healthCheckUrl
         ? await isHealthCheckReady(runtime.definition.healthCheckUrl)
         : false
+      if (cancelled()) return this.snapshot(runtime)
       if (ready) {
         if (runtime.definition.type === 'mcpo') {
           // An mcpo that answers with our own generated key can only be an
           // instance this app started and lost track of — after a crash or a
           // forced quit. Adopt it instead of refusing to start.
           const ownKey = this.registry.getApiKey(runtime.definition.id)
-          if (
+          const authenticated =
             runtime.definition.healthCheckUrl &&
             ownKey &&
             (await isManagedMcpoOnPort(runtime.definition.healthCheckUrl, ownKey))
-          ) {
+          if (cancelled()) return this.snapshot(runtime)
+          if (authenticated) {
             runtime.ownsProcess = false
             runtime.logs.add(
               `Adopted the mcpo instance already running on port ${port}; its bearer key matches this connector`
@@ -327,6 +349,7 @@ export class ManagedServicesManager {
         argument === MCPO_API_KEY_PLACEHOLDER ? (secretKey ?? '') : argument
       )
       const launchCommand = await resolveExecutable(runtime.definition.command)
+      if (cancelled()) return this.snapshot(runtime)
       runtime.logs.add(
         `Starting ${launchCommand} ${runtime.definition.args
           .map((argument) => (argument === MCPO_API_KEY_PLACEHOLDER ? '<redacted>' : argument))
@@ -349,7 +372,8 @@ export class ManagedServicesManager {
         runtime.logs.add(`Process error: ${error.message}`, 'stderr')
       })
       child.once('exit', (code, signal) => {
-        if (runtime.process === child) runtime.process = null
+        if (runtime.process !== child || generation !== runtime.generation) return
+        runtime.process = null
         runtime.ownsProcess = false
         const reason = code !== null ? `exit code ${code}` : `signal ${signal ?? 'unknown'}`
         runtime.logs.add(`Process exited with ${reason}`)
@@ -378,6 +402,12 @@ export class ManagedServicesManager {
         if (runtime.process !== child || generation !== runtime.generation)
           return this.snapshot(runtime)
         if (await isHealthCheckReady(runtime.definition.healthCheckUrl)) {
+          if (
+            runtime.process !== child ||
+            generation !== runtime.generation ||
+            runtime.stopRequested
+          )
+            return this.snapshot(runtime)
           runtime.logs.add(`Health check passed: ${runtime.definition.healthCheckUrl}`)
           this.setStatus(runtime, 'running')
           return this.snapshot(runtime)
@@ -387,6 +417,9 @@ export class ManagedServicesManager {
 
       runtime.stopRequested = true
       await this.terminateProcessTree(child)
+      if (generation !== runtime.generation) return this.snapshot(runtime)
+      runtime.process = null
+      runtime.ownsProcess = false
       runtime.stopRequested = false
       return this.fail(
         runtime,
@@ -394,9 +427,11 @@ export class ManagedServicesManager {
         true
       )
     } catch (error) {
+      if (generation !== runtime.generation || runtime.stopRequested) return this.snapshot(runtime)
       if (runtime.process) {
         runtime.stopRequested = true
         await this.terminateProcessTree(runtime.process).catch(() => undefined)
+        if (generation !== runtime.generation) return this.snapshot(runtime)
         runtime.stopRequested = false
       }
       runtime.process = null

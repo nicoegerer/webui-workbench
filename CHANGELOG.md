@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-30
+
+### Fixed
+
+- Switching between MCP adapters and ordinary local processes now preserves the actual executable and arguments without invalid draft IDs or mismatched form fields.
+- Saving and starting connectors returns immediately with a visible startup status. Cancelled health checks and delayed process exits cannot overwrite the state of a replacement; retries remain bounded.
+- Enabling Open Terminal or llama.cpp autostart also starts it immediately. Optional services remain disabled by default and saved preferences are preserved.
+- llama.cpp shares concurrent startup requests, cancels pending starts safely, reports setup and readiness failures, and permits retry after failure instead of falsely reporting success.
+- Added lifecycle and settings regressions and clarified the general connection guides.
+
 ## [0.1.0] - 2026-09-29
 
 ### Community fork

@@ -6,15 +6,15 @@ All connections are optional. A fresh profile contains an empty registry. Discov
 
 ## Choose the right kind of connection
 
-| You want to connect… | Where / how |
-| --- | --- |
-| An Open WebUI server | Desktop Connections |
-| An OpenAI-compatible model endpoint | Open WebUI administrator model Connections |
-| GitHub | [Workspace access and permissions](workspaces-and-preview.md#github-access) |
-| A local stdio MCP server | Discover → Local connector (mcpo adapter) |
-| An existing Streamable HTTP MCP endpoint | Remote MCP / custom remote connector |
-| An ordinary background executable | Advanced add → Local process |
-| Local files and shell commands | Desktop Open Terminal settings, then select a workspace beside the message input |
+| You want to connect…                     | Where / how                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------- |
+| An Open WebUI server                     | Desktop Connections                                                              |
+| An OpenAI-compatible model endpoint      | Open WebUI administrator model Connections                                       |
+| GitHub                                   | [Workspace access and permissions](workspaces-and-preview.md#github-access)      |
+| A local stdio MCP server                 | Discover → Local connector (mcpo adapter)                                        |
+| An existing Streamable HTTP MCP endpoint | Remote MCP / custom remote connector                                             |
+| An ordinary background executable        | Advanced add → Local process                                                     |
+| Local files and shell commands           | Desktop Open Terminal settings, then select a workspace beside the message input |
 
 The desktop settings and the embedded Open WebUI administrator settings are different. A model gateway belongs in **model Connections**, not the MCP tool list. It may additionally be managed as a local process.
 
@@ -36,18 +36,18 @@ Pausing preserves configuration but stops/disables access. Removing deletes that
 
 Choose **Discover → Local connector** and split the author's stdio launch command into executable and arguments:
 
-| Form field | What to enter |
-| --- | --- |
-| Name | Your own descriptive name; it does not change how the server runs |
-| Server program | The executable alone; use an absolute path if discovery fails |
-| Arguments, one per line | One literal argument per line, in the original order, without repeating the executable |
-| Use in chats and start automatically | Global opt-in: start this connector and make its tools available across chats |
-| Advanced → Local port | An unused port for the adapter, not the stdio child |
-| Adapter program | `uvx` or its absolute path; separate from the server executable |
-| Working directory | Optional command start directory, not the chat's workspace selection |
-| Environment variables | Values required by the provider; use these for secrets instead of arguments |
-| Status URL | Optional documented readiness endpoint; do not assume every server has `/health` |
-| Start timeout / restarts | Allow for cold starts; inspect errors before increasing retries |
+| Form field                           | What to enter                                                                          |
+| ------------------------------------ | -------------------------------------------------------------------------------------- |
+| Name                                 | Your own descriptive name; it does not change how the server runs                      |
+| Server program                       | The executable alone; use an absolute path if discovery fails                          |
+| Arguments, one per line              | One literal argument per line, in the original order, without repeating the executable |
+| Use in chats and start automatically | Global opt-in: start this connector and make its tools available across chats          |
+| Advanced → Local port                | An unused port for the adapter, not the stdio child                                    |
+| Adapter program                      | `uvx` or its absolute path; separate from the server executable                        |
+| Working directory                    | Optional command start directory, not the chat's workspace selection                   |
+| Environment variables                | Values required by the provider; use these for secrets instead of arguments            |
+| Status URL                           | Optional documented readiness endpoint; do not assume every server has `/health`       |
+| Start timeout / restarts             | Allow for cold starts; inspect errors before increasing retries                        |
 
 Example of splitting a command (**placeholder only**, not an installable connector): `python "C:\Tools\example-mcp\server.py" --transport stdio` becomes server program `python` and three argument lines:
 
@@ -71,6 +71,8 @@ Use the provider's exact **Streamable HTTP MCP** endpoint and supported authenti
 
 Use **Advanced add → Local process** for software the desktop should supervise. Supply the real executable, arguments, environment, optional working directory and documented health check. A running generic process is not automatically registered as tools or a model provider.
 
+If a process was accidentally saved as MCP, open **Yours → Manage → Advanced → Connection type → Local process**, then save. The executable and arguments are retained; adapter-only settings are removed. Saving closes the editor while startup continues in the service card. Check its status/log or stop it there; repeated start failures stop at the configured restart limit.
+
 For a gateway you already run manually, skip process management:
 
 1. Install and authenticate the gateway using its author's instructions.
@@ -87,7 +89,7 @@ For local-only use, bind services to `127.0.0.1`. A server listening on `0.0.0.0
 
 ## Open Terminal and project folders
 
-Open **desktop Settings → Open Terminal → Install/Start**. The app installs the tested runtime when needed. **Start** keeps that service running for this session even when **Start on launch** is off. The switch only opts in to future automatic starts; fresh profiles leave it off. **Stop** ends the active instance.
+Open **desktop Settings → Open Terminal → Install/Start**. The app installs the tested runtime when needed. **Start** keeps that service running for this session even when **Start on launch** is off. Enabling the switch starts it immediately and on future app launches; disabling it does not stop a running session. Fresh profiles leave it off. **Stop** ends the active instance. The same opt-in behavior applies to **Inference Runtime → llama.cpp**; a local model must also be installed and selected to chat. Startup failures are shown in the settings rather than reported as a successful connection.
 
 With no working directory configured, the service uses your home directory. For a project, select its actual folder with the workspace chip beside the message input; a workspace terminal starts as needed. Changing folders does not relocate files. Idle chat-owned instances can be released automatically; live commands, terminal sessions and explicitly started services are retained.
 
@@ -95,15 +97,15 @@ Commands execute with your OS user's permissions, **not in a sandbox**. GitHub c
 
 ## Troubleshooting checklist
 
-| Symptom | Check first |
-| --- | --- |
-| Executable not found | Install its prerequisite or use an absolute executable path; restart the desktop after PATH changes |
-| Port occupied | Stop the duplicate intentionally or choose another unused adapter port |
-| Authentication error / MFA | Authenticate outside chat; check provider scopes and token expiry |
-| Process exits immediately | First log error, arguments, runtime requirements and working directory |
-| Running, but no tools | Connector type, administrator sync, permissions and a tool-capable model |
-| Open Terminal stops just after Start | Update the desktop: versions through `workbench.3` could release a manually started idle service |
-| Wrong folder or preview | Workspace chip, full path and the workspace guide |
+| Symptom                              | Check first                                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Executable not found                 | Install its prerequisite or use an absolute executable path; restart the desktop after PATH changes |
+| Port occupied                        | Stop the duplicate intentionally or choose another unused adapter port                              |
+| Authentication error / MFA           | Authenticate outside chat; check provider scopes and token expiry                                   |
+| Process exits immediately            | First log error, arguments, runtime requirements and working directory                              |
+| Running, but no tools                | Connector type, administrator sync, permissions and a tool-capable model                            |
+| Open Terminal stops just after Start | Update the desktop: versions through `workbench.3` could release a manually started idle service    |
+| Wrong folder or preview              | Workspace chip, full path and the workspace guide                                                   |
 
 Test one harmless read-only tool call first. For file work, request one small file in a disposable selected folder and verify **Files** and the full path. A plain model response or green endpoint alone is not proof of working tools.
 

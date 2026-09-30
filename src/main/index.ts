@@ -195,7 +195,6 @@ if (gpuSandboxDisabled) {
 // repeated GPU process crashes within the same session.
 app.disableDomainBlockingFor3DAPIs()
 
-
 let mainWindow: BrowserWindow | null = null
 let contentWindow: BrowserWindow | null = null
 let spotlightWindow: BrowserWindow | null = null
@@ -210,7 +209,6 @@ let SERVER_REACHABLE = false
 let SERVER_PID: number | null = null
 let AUTH_TOKEN: string | null = null
 let voiceInputRecording = false
-
 
 /** Flatpak needs an exposed shortcut portal; other environments report registration failures individually. */
 function isGlobalShortcutSupported(): boolean {
@@ -415,7 +413,6 @@ function toggleSpotlight(selectedText?: string): void {
   }
 }
 
-
 function createVoiceInputWindow(): BrowserWindow {
   const { screen } = require('electron')
   const cursorPoint = screen.getCursorScreenPoint()
@@ -563,7 +560,6 @@ async function toggleVoiceInput(): Promise<void> {
   }
 }
 
-
 async function toggleCall(): Promise<void> {
   try {
     const conn = await getDefaultConnection()
@@ -587,7 +583,6 @@ async function toggleCall(): Promise<void> {
     log.warn('Call: config check failed:', err)
   }
 }
-
 
 const DEFAULT_WINDOW_WIDTH = 1280
 const DEFAULT_WINDOW_HEIGHT = 800
@@ -807,7 +802,6 @@ function createContentWindow(url: string, connectionId: string): BrowserWindow {
   return contentWindow
 }
 
-
 const updateTray = () => {
   if (!tray || !CONFIG) return
 
@@ -873,7 +867,6 @@ const updateTray = () => {
   tray?.setContextMenu(trayMenu)
 }
 
-
 // Local is a virtual connection, available when open-webui is installed; only remote entries are persisted.
 const buildLocalConnection = (): Connection => {
   const port = CONFIG?.localServer?.port ?? 8080
@@ -931,7 +924,6 @@ const connectTo = async (connection: Connection) => {
 
   return { url, connectionId: connection.id }
 }
-
 
 // Replaced when the renderer reconnects its PTY port.
 let activePtyDataDisposable: { dispose: () => void } | null = null
@@ -1171,11 +1163,9 @@ const resetAppHandler = async () => {
   }
 }
 
-
 const sendToRenderer = (type: string, data?: any) => {
   mainWindow?.webContents.send('main:data', { type, data })
 }
-
 
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
@@ -1398,7 +1388,6 @@ if (!gotTheLock) {
         })
       }
     })
-
 
     ipcMain.handle('get:version', () => app.getVersion())
 
@@ -1732,7 +1721,6 @@ if (!gotTheLock) {
         }
       }
     )
-
 
     ipcMain.handle('voiceInput:micPermission', async () => {
       if (process.platform === 'darwin') {
@@ -2149,7 +2137,7 @@ if (!gotTheLock) {
         log.error('Failed to setup llamacpp:', error)
         sendToRenderer('status:llamacpp', 'failed')
         sendToRenderer('error', { message: `llamacpp setup failed: ${error?.message}` })
-        return null
+        throw new Error(`llama.cpp setup failed: ${error?.message ?? error}`)
       }
     })
 
@@ -2175,7 +2163,7 @@ if (!gotTheLock) {
         log.error('Failed to start llamacpp:', error)
         sendToRenderer('status:llamacpp', 'failed')
         sendToRenderer('error', { message: `llamacpp failed: ${error?.message}` })
-        return null
+        throw new Error(`llama.cpp failed: ${error?.message ?? error}`)
       }
     })
 
@@ -2354,7 +2342,6 @@ if (!gotTheLock) {
         throw error
       }
     })
-
 
     const trayIcon = nativeImage.createFromPath(icon)
     tray = new Tray(trayIcon.resize({ width: 16, height: 16 }))
