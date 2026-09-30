@@ -612,7 +612,7 @@ const stopLlamaCppProcess = async (clearLogs = true): Promise<void> => {
       log.warn('Failed to kill llama-server PTY:', e)
     }
     await new Promise((r) => setTimeout(r, 2000))
-    if (childPid) {
+    if (childPid && ptyProcess === child) {
       try {
         process.kill(childPid, 0)
         process.kill(childPid, 'SIGKILL')

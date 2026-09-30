@@ -7,6 +7,7 @@ import ts from 'typescript'
 
 function fixture() {
   const children: any[] = []
+  const processSignals: Array<{ pid: number; signal?: string | number }> = []
   let healthy = true
   let failConfig = false
   let configGate: Promise<void> | undefined
@@ -90,6 +91,7 @@ function fixture() {
         arch: 'x64',
         env: {},
         kill(pid: number, signal?: string | number) {
+        processSignals.push({ pid, signal })
           const child = children.find((c) => c.pid === pid && c.alive)
           if (!child) throw new Error('not alive')
           if (signal === 'SIGKILL') child.exit()
@@ -106,6 +108,7 @@ function fixture() {
   return {
     api: exports as any,
     children,
+    processSignals,
     config,
     setHealthy: (value: boolean) => {
       healthy = value
@@ -132,6 +135,7 @@ test('concurrent llama.cpp starts share a single ready process even with autosta
   assert.equal(f.children.length, 1)
   assert.equal(f.config.llamaCpp.enabled, false)
   await f.api.stopLlamaCpp()
+  assert.deepEqual(f.processSignals, [], 'An observed process exit must not reuse its old PID')
 })
 
 test('failed readiness never reports success, cleans up and permits a retry', async () => {
