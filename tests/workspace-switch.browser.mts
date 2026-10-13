@@ -176,7 +176,7 @@ test(
       localStorage.token='test-only';
       const saved=location.search.includes('saved');
       const props={history:{messages:{}},chatId:saved?'existing-chat':null,models:[],params:{},chatFiles:[]};
-      user.set({role:'admin',permissions:{}});config.set({features:{},code:{interpreter_engine:'pyodide'}});settings.set({});
+      user.set({role:'admin',permissions:{}});config.set({features:{enable_tool_servers:true},code:{interpreter_engine:'pyodide'}});settings.set({});
       terminalServers.set(${JSON.stringify(terminals.map((t) => ({ id: t.id, url: '/api/v1/terminals/' + t.id })))});
       const app=mount(TestControls,{target:document.getElementById('fixture'),props,context:new Map([['i18n',i18n]])});
       const bridge=(${createTerminalStoreBridge.toString()})({terminalServers,selectedTerminalId,showControls},fetch,()=> 'test-only');
