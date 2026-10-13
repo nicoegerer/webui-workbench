@@ -47,7 +47,7 @@ async def check_resolver(source):
     ]
     connections = [{'config': {'function_name_filter_list': ''}} for _ in servers]
 
-    async def empty_groups(*args): return []
+    async def empty_groups(*args, **kwargs): return []
     async def empty_tools(*args): return {}
     async def get_servers(*args): return servers
     async def config_get(*args): return connections
@@ -57,6 +57,8 @@ async def check_resolver(source):
 
     env = {
         'ENABLE_PLUGINS': True,
+        'ENABLE_TOOLS': True,
+        'ENABLE_TOOL_SERVERS': True,
         'Groups': SimpleNamespace(get_groups_by_member_id=empty_groups),
         'Tools': SimpleNamespace(get_tools_by_ids=empty_tools),
         'Config': SimpleNamespace(get=config_get),
