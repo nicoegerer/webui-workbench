@@ -232,6 +232,7 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                   name: ${{ matrix.os }}-${{ matrix.arch }}
+                  retention-days: 3
                   path: |
                       dist/*.exe
                       dist/*.dmg
@@ -316,3 +317,21 @@ jobs:
                   draft: false
                   prerelease: ${{ contains(steps.version.outputs.version, '-') }}
                   files: release-assets/*
+
+            - name: Keep only the latest release downloads
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  current="v${{ steps.version.outputs.version }}"
+                  latest=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName,isLatest --jq '.[] | select(.isLatest) | .tagName')
+                  if [ "$current" != "$latest" ]; then
+                    echo "This version is not the latest release; keeping existing downloads."
+                    exit 0
+                  fi
+                  gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName --jq '.[].tagName' |
+                    while IFS= read -r tag; do
+                      if [ "$tag" != "$current" ]; then
+                        gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+                      fi
+                    done
