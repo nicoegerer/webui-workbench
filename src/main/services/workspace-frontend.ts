@@ -12,10 +12,11 @@ function* namedLocations(
   map: SourceMap,
   sourceIndex: number,
   target: string
-): Generator<{ generatedLine: number; generatedColumn: number }> {
+): Generator<{ generatedLine: number; generatedColumn: number; sourceLine: number }> {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
   let file = 0,
-    name = 0
+    name = 0,
+    sourceLine = 0
   for (const [generatedLine, mappingLine] of map.mappings.split(';').entries()) {
     let generatedColumn = 0
     for (const segment of mappingLine.split(',')) {
@@ -38,10 +39,11 @@ function* namedLocations(
       generatedColumn += fields[0]
       if (fields.length < 4) continue
       file += fields[1]
+      sourceLine += fields[2]
       if (fields.length < 5) continue
       name += fields[4]
       if (file === sourceIndex && map.names[name] === target)
-        yield { generatedLine, generatedColumn }
+        yield { generatedLine, generatedColumn, sourceLine }
     }
   }
 }
@@ -53,13 +55,39 @@ export function patchWorkspaceFileNav(code: string, map: SourceMap): string | nu
   )
   if (sourceIndex < 0) return null
   const source = map.sourcesContent[sourceIndex]
-  if (!source?.includes("const useServerPath = !!chatId || savedPath === '/';")) {
+  const oldInitialization = source?.includes("const useServerPath = !!chatId || savedPath === '/';")
+  const currentInitialization = source?.includes(
+    'terminalContext && terminalContext.terminalId === $selectedTerminalId'
+  ) && source.includes('terminalContext.currentDirectory') && source.includes(': serverPath;')
+  if (!oldInitialization && !currentInitialization) {
     throw new Error(
       'Open WebUI FileNav initialization changed; workspace compatibility needs review.'
     )
   }
   const lines = code.split('\n')
   let patched = false
+  if (currentInitialization) {
+    const originalLines = source!.split('\n')
+    for (const { generatedLine, generatedColumn, sourceLine } of namedLocations(
+      map, sourceIndex, 'savedPath'
+    )) {
+      if (!/^\s*savedPath\s*=\s*$/.test(originalLines[sourceLine] ?? '') ||
+          !originalLines.slice(sourceLine + 1, sourceLine + 5).join(' ').includes('terminalContext.currentDirectory')) continue
+      const tail = lines[generatedLine].slice(generatedColumn)
+      const assignment = tail.match(/^([\w$]+=)([\w$]+\(\)&&[\w$]+\(\)\.terminalId===[\w$]+\(\)\?[\w$]+\(\)\.currentDirectory:([\w$]+))(?=[,;])/)
+      if (assignment) {
+        const start = generatedColumn + assignment[1].length
+        lines[generatedLine] = lines[generatedLine].slice(0, start) +
+          assignment[3].padEnd(assignment[2].length) +
+          lines[generatedLine].slice(start + assignment[2].length)
+        patched = true
+      } else if (/^[\w$]+=[\w$]+\s+(?=[,;])/.test(tail)) {
+        patched = true // Already patched on an earlier app start.
+      }
+    }
+    if (!patched) throw new Error('Open WebUI FileNav generated initialization changed.')
+    return lines.join('\n')
+  }
   for (const { generatedLine, generatedColumn } of namedLocations(
     map,
     sourceIndex,
