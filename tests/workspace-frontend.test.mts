@@ -33,6 +33,23 @@ test('new and existing chats always initialize FileNav from the selected termina
   assert.equal(patchWorkspaceFileNav(patched, sourceMap), patched, 'Idempotent across app starts')
 })
 
+test('current Open WebUI FileNav uses the server cwd even with stale terminal context', () => {
+  const map = {
+    ...sourceMap,
+    sourcesContent: [
+      'savedPath =\n\tterminalContext && terminalContext.terminalId === $selectedTerminalId\n\t\t? terminalContext.currentDirectory\n\t\t: serverPath;'
+    ],
+    names: ['savedPath']
+  }
+  const original = 'vo=C()&&C().terminalId===s()?C().currentDirectory:ks,vo=Er(vo);'
+  const patched = patchWorkspaceFileNav(original, map)!
+  assert.equal(patched.length, original.length)
+  const savedPath = new Function('C', 's', 'ks', 'Er', 'let vo; ' + patched + ' return vo;')
+  assert.equal(savedPath(() => ({ terminalId: 'same', currentDirectory: '/old' }), () => 'same', '/new', (x: string) => x), '/new')
+  assert.equal(patchWorkspaceFileNav(patched, map), patched)
+  assert.throws(() => patchWorkspaceFileNav('vo=someNewLogic;', map), /changed/)
+})
+
 test('unrelated assets remain untouched and changed upstream contracts fail explicitly', () => {
   assert.equal(patchWorkspaceFileNav('anything', { ...sourceMap, sources: ['unrelated.ts'] }), null)
   assert.throws(() => patchWorkspaceFileNav('us=someNewLogic;', sourceMap), /not found/)
