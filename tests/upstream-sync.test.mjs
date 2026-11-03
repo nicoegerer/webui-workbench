@@ -396,6 +396,56 @@ test('workflow explicitly dispatches releases and keeps the default branch curre
   assert.ok(source.includes('node "$RUNNER_TEMP/prepare-upstream-sync.mjs" "$BACKEND_TAG"'))
 })
 
+test('atomic publication succeeds when token permissions forbid advancing the auxiliary main snapshot', (t) => {
+  const f = fixture(t)
+  const releaseBefore = f.git('rev-parse', 'HEAD')
+  f.git('checkout', 'main')
+  f.write('.github/workflows/official.yml', 'name: Updated official workflow\n')
+  f.write('official-feature.txt', 'complete upstream feature\n')
+  const upstream = f.commit('official feature and workflow update')
+  f.git('update-ref', 'refs/remotes/upstream/main', upstream)
+  // The reviewed default branch already contains these workflows, as on GitHub.
+  f.git('checkout', '-b', 'reviewed-default', 'origin/managed-services')
+  f.git('merge', '--no-edit', upstream)
+  const reviewed = f.git('rev-parse', 'HEAD')
+  f.git('update-ref', 'refs/remotes/origin/managed-services', reviewed)
+  f.git('checkout', 'release')
+  prepareSync(f.cwd, 'v0.11.3')
+  const candidate = f.git('rev-parse', 'HEAD')
+  const remote = join(f.cwd, '.git', 'publication.git')
+  f.git('init', '--bare', remote)
+  f.git('remote', 'add', 'origin', remote)
+  f.git(
+    'push',
+    'origin',
+    `${f.upstream}:refs/heads/main`,
+    `${reviewed}:refs/heads/managed-services`,
+    `${releaseBefore}:refs/heads/release`
+  )
+  writeFileSync(
+    join(remote, 'hooks', 'pre-receive'),
+    '#!/bin/sh\nwhile read old new ref; do\n' +
+      '  if [ "$ref" = "refs/heads/main" ]; then\n' +
+      '    echo "main workflow update requires workflows permission" >&2\n    exit 1\n  fi\ndone\n',
+    { mode: 0o755 }
+  )
+  const workflow = readFileSync(
+    new URL('../.github/workflows/sync-upstream.yml', import.meta.url),
+    'utf8'
+  )
+  const command = workflow.match(/^\s*(git push --atomic origin[^\r\n]*)/m)?.[1]
+  assert.ok(command, 'Test the exact publication command used by Actions')
+  f.git(...command.split(/\s+/).slice(1))
+  for (const branch of ['managed-services', 'release'])
+    assert.equal(f.git('--git-dir', remote, 'rev-parse', `refs/heads/${branch}`), candidate)
+  assert.equal(f.git('--git-dir', remote, 'rev-parse', 'refs/heads/main'), f.upstream)
+  f.git('merge-base', '--is-ancestor', upstream, candidate)
+  assert.equal(
+    readFileSync(join(f.cwd, 'official-feature.txt'), 'utf8'),
+    'complete upstream feature\n'
+  )
+})
+
 test('every gh operation targets an explicit repository after adding upstream', () => {
   const source = readFileSync(
     new URL('../.github/workflows/sync-upstream.yml', import.meta.url),

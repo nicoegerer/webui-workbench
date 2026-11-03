@@ -28,7 +28,7 @@ The second command requires the pinned Open Terminal runtime in your test Python
 
 ## Branches and releases
 
-- `main`: unchanged official Desktop mirror.
+- `main`: historical official Desktop snapshot and ancestry anchor; excluded from automatic publication.
 - `managed-services`: default branch containing this fork.
 - `release`: the tested packaging branch.
 

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated native-build ABI metadata for Electron 45, aligned the Flatpak SDK with its runtime, and made the build typecheck the actual renderer sources.
 - Retained startup failure reporting and immediate opt-in starts with the new inference runtime UI.
 - Preserved open native tabs, unsaved editors and their workspace connections when changing the composer workspace; fixed the 0.13 runtime compatibility gate that stopped the post-merge sync.
+- Kept atomic publication focused on the default and release branches so GitHub's workflow-permission restriction on the auxiliary upstream snapshot cannot block otherwise verified updates.
 
 Integrated official Desktop release notes are preserved in [Desktop 0.1 notes](docs/desktop-upstream-changelog.md).
 

@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Mirror upstream and publish Workbench fork update
+    name: Integrate upstream and publish Workbench fork update
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -75,7 +75,10 @@ jobs:
 
       - name: Publish branches atomically (never force)
         run: |
-          git push --atomic origin upstream/main:main HEAD:managed-services HEAD:release
+          # Both shipping branches receive the fully integrated candidate.
+          # Updating the auxiliary upstream snapshot can require workflows
+          # permission that GITHUB_TOKEN cannot grant itself.
+          git push --atomic origin HEAD:managed-services HEAD:release
 
       - name: Explicitly start release, or recover a missing release
         env:

@@ -23,7 +23,7 @@ Fresh profiles start without active connections. The distribution has a separate
 
 ## Automatic updates without a manual trigger
 
-The default branch is `managed-services`. `main` mirrors official Desktop; `release` builds the fork.
+The default branch is `managed-services`; `release` builds the fork. Both receive the complete integrated upstream history. `main` retains a historical official Desktop snapshot used as an ancestry check; it is not updated by the scheduled workflow.
 
 1. GitHub Actions is scheduled daily at **06:17 UTC**. GitHub can delay scheduled runs, sometimes substantially; this is not a precise-time guarantee.
 2. It fetches official Desktop `main` and the latest stable Open WebUI runtime release.
@@ -31,6 +31,8 @@ The default branch is `managed-services`. `main` mirrors official Desktop; `rele
 4. Unit/regression tests, build and the runtime compatibility contract must pass before an atomic, non-forced push.
 5. The workflow explicitly starts the release pipeline because pushes made by `GITHUB_TOKEN` do not trigger another push workflow. Users do not need to click Run workflow.
 6. All required platform packaging jobs must pass before release assets and matching update manifests are published.
+
+The atomic push updates `managed-services` and `release`. It does not also advance the auxiliary `main` snapshot: pristine upstream workflow files can require a `workflows` permission that `GITHUB_TOKEN` cannot grant itself. This does not change which Desktop source commits or Open WebUI features are integrated into the shipping branches.
 
 Stable Open WebUI releases are selected without a minor-version ceiling. The candidate adopts the complete upstream interface and features; compatibility failures require adapting Workbench's extensions before publication, rather than holding the automatic selector on an older release.
 
