@@ -21,7 +21,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-2022]
     env:
-      OPEN_WEBUI_FRONTEND: ${{ runner.temp }}/workbench-frontend
+      OPEN_WEBUI_FRONTEND: ${{ github.workspace }}/../workbench-frontend
     steps:
       - uses: actions/checkout@v4
         with:
