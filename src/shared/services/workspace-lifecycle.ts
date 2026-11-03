@@ -1,3 +1,32 @@
+/** Native 0.13 tabs own workspaces independently of the composer selection.
+ * Opaque tab IDs include terminals and untitled editors; retain known instances
+ * until those tabs close rather than discarding an unsaved buffer's connection.
+ * Injected with toString(): keep this function self-contained.
+ */
+export function nativeTabWorkspaceLeases(tabIds: string[], registeredIds: string[]): string[] {
+  const keep = new Set<string>()
+  const managed = (id: unknown): id is string =>
+    typeof id === 'string' && /^desktop-(ws|gh)-/.test(id)
+  for (const id of tabIds) {
+    if (id.startsWith('files:')) {
+      if (managed(id.slice(6))) keep.add(id.slice(6))
+      continue
+    }
+    if (['chat', 'artifacts', 'preview', 'voice', 'comments'].includes(id)) continue
+    try {
+      const parts = JSON.parse(id)
+      if (Array.isArray(parts) && ['file', 'browser', 'desktop'].includes(parts[0])) {
+        if (managed(parts[1])) keep.add(parts[1])
+        continue
+      }
+    } catch {
+      /* A native terminal, side chat or untitled file has an opaque UUID. */
+    }
+    for (const registered of registeredIds) if (managed(registered)) keep.add(registered)
+  }
+  return [...keep]
+}
+
 /** Keep current/pending workspaces and active background chats, not every old chat forever.
  * Injected into the guest as text: this function must remain self-contained.
  */

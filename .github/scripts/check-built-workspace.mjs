@@ -51,6 +51,15 @@ assert.deepEqual(
   }),
   ['selected']
 )
+const leasesStart = bundle.indexOf('function nativeTabWorkspaceLeases(')
+assert.ok(leasesStart >= 0, 'Native tab workspace leases must be bundled')
+const leasesEnd = bundle.indexOf('\n}\n', leasesStart) + 2
+assert.ok(leasesEnd > leasesStart)
+const tabLeases = new Function('return (' + bundle.slice(leasesStart, leasesEnd) + ')')()
+assert.deepEqual(
+  tabLeases(['files:desktop-ws-open', 'opaque-editor-id'], ['desktop-ws-open', 'desktop-gh-editor']),
+  ['desktop-ws-open', 'desktop-gh-editor']
+)
 const bridgeStart = bundle.indexOf('function createTerminalStoreBridge(')
 assert.ok(bridgeStart >= 0, 'Terminal store bridge must be bundled')
 const bridgeEnd = bundle.indexOf('\n}\n', bridgeStart) + 2

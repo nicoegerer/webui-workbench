@@ -11,6 +11,7 @@ interface TerminalStores {
   terminalServers: WritableStore<TerminalEntry[] | null>
   selectedTerminalId: WritableStore<string | null>
   showControls?: { set(value: boolean): void }
+  showTabs?: { set(value: boolean | 'files'): void }
   showFileNavPath?: { set(value: null): void }
   showFileNavDir?: { set(value: null): void }
   showSettings?: { set(value: string): void }
@@ -45,7 +46,8 @@ export function createTerminalStoreBridge(
 
   return {
     hideFiles(): void {
-      stores.showControls?.set(false)
+      if (stores.showTabs) stores.showTabs.set(false)
+      else stores.showControls?.set(false)
     },
     openIntegrations(): boolean {
       if (!stores.showSettings) return false
@@ -98,10 +100,12 @@ export function createTerminalStoreBridge(
         if (changed) {
           stores.showFileNavPath?.set(null)
           stores.showFileNavDir?.set(null)
-          stores.selectedTerminalId.set(null)
-          // Let Svelte unmount FileNav, discarding its preview and back stack,
-          // before mounting the new terminal. Do not reload or reset the chat.
-          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          // ChatTabs owns independent file/terminal tabs. Its null-selection
+          // pruning would discard those tabs, including unsaved editors.
+          if (!stores.showTabs) {
+            stores.selectedTerminalId.set(null)
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          }
           if (!isCurrent()) return false
         }
         if (terminals) {
@@ -115,7 +119,10 @@ export function createTerminalStoreBridge(
           stores.terminalServers.set(direct.concat(proxiedSystemTerminals))
         }
         stores.selectedTerminalId.set(terminalId)
-        if (terminalId && changed) stores.showControls?.set(true)
+        if (terminalId && changed) {
+          if (stores.showTabs) stores.showTabs.set('files')
+          else stores.showControls?.set(true)
+        }
         appliedContext = workspace.context ?? ''
         return read(stores.selectedTerminalId) === terminalId
       })

@@ -2,8 +2,37 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   resolveWorkspaceKeepIds,
+  nativeTabWorkspaceLeases,
   canReleaseWorkspaceTerminal
 } from '../src/shared/services/workspace-lifecycle.ts'
+
+test('native file tabs lease their own workspace even after the composer selects another one', () => {
+  assert.deepEqual(
+    nativeTabWorkspaceLeases(
+      [
+        'files:desktop-ws-first',
+        JSON.stringify(['file', 'desktop-gh-second', '/index.html']),
+        'artifacts',
+        'preview',
+        'voice',
+        'comments'
+      ],
+      ['desktop-ws-first', 'desktop-gh-second', 'desktop-ws-idle']
+    ),
+    ['desktop-ws-first', 'desktop-gh-second']
+  )
+  assert.deepEqual(nativeTabWorkspaceLeases([], ['desktop-ws-idle']), [])
+  assert.deepEqual(nativeTabWorkspaceLeases(['files:https://user.example'], []), [])
+})
+
+test('untitled editors and native terminal tabs retain registered workspaces until closed', () => {
+  const registered = ['desktop-ws-first', 'desktop-gh-second', 'https://external.example']
+  assert.deepEqual(
+    nativeTabWorkspaceLeases(['opaque-native-tab-id'], registered),
+    registered.slice(0, 2)
+  )
+  assert.deepEqual(nativeTabWorkspaceLeases(['preview'], registered), [])
+})
 
 test('retain the selection, pending switch and request leases, release only idle historic workspaces', async () => {
   const selections = {

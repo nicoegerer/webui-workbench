@@ -38,11 +38,28 @@ export function createWorkspacePreviewTab(
     if (wasOpen) void ask('workspacePreviewHide')
   }
   const findPanel = (): {
-    files: HTMLButtonElement
+    files: HTMLElement
     header: HTMLElement
     body: HTMLElement
+    activate?: () => void
   } | null => {
     const container = document.getElementById('controls-container') ?? document
+    // Open WebUI 0.13 retains a FileNav for each native terminal tab. Anchor
+    // only to the selected workspace's Files tab and preserve its tab controls.
+    for (const tab of container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')) {
+      const wrapper = tab.closest<HTMLElement>('[data-panel-tab]')
+      if (!wrapper || wrapper.dataset.panelTab !== `files:${current?.terminalId}`) continue
+      const panel = document.getElementById(tab.getAttribute('aria-controls') ?? '')
+      const header = container instanceof HTMLElement ? container.firstElementChild : null
+      if (
+        panel instanceof HTMLElement &&
+        header instanceof HTMLElement &&
+        header.getBoundingClientRect().width > 0
+      ) {
+        return { files: wrapper, header, body: panel, activate: () => tab.click() }
+      }
+    }
+    if (container.querySelector('button[role="tab"]')) return null
     for (const candidate of container.querySelectorAll<HTMLButtonElement>('button')) {
       if (!['Files', 'Dateien'].includes(candidate.textContent?.trim() ?? '')) continue
       const row = candidate.parentElement
@@ -154,12 +171,20 @@ export function createWorkspacePreviewTab(
       button.dataset.desktopPreviewTab = 'true'
       button.className =
         'px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap text-gray-500 dark:text-gray-400'
-      button.textContent = translate('Vorschau', 'Preview')
+      button.textContent = panel.activate
+        ? translate('Website-Vorschau', 'Website preview')
+        : translate('Vorschau', 'Preview')
       button.setAttribute('aria-pressed', 'false')
       button.onclick = (event) => {
         event.preventDefault()
         event.stopPropagation()
-        show()
+        if (panel.activate) {
+          panel.activate()
+          const selectedButton = button
+          queueMicrotask(() => {
+            if (button === selectedButton) show()
+          })
+        } else show()
       }
       panel.files.after(button)
       const owner = header

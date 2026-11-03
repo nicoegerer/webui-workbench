@@ -32,6 +32,8 @@ The default branch is `managed-services`. `main` mirrors official Desktop; `rele
 5. The workflow explicitly starts the release pipeline because pushes made by `GITHUB_TOKEN` do not trigger another push workflow. Users do not need to click Run workflow.
 6. All required platform packaging jobs must pass before release assets and matching update manifests are published.
 
+Stable Open WebUI releases are selected without a minor-version ceiling. The candidate adopts the complete upstream interface and features; compatibility failures require adapting Workbench's extensions before publication, rather than holding the automatic selector on an older release.
+
 Routine version/identity overlaps in `package.json` and `package-lock.json` use a constrained three-way merge: fork-owned identity fields stay local, independent official dependency changes are retained, and competing dependency changes fail closed. Official Desktop release notes are refreshed in [their own snapshot](desktop-upstream-changelog.md); Workbench's Changelog retains its independent version history. This handles overlapping official and fork version numbers without discarding either project's notes. Source and dependency conflicts still stop publication.
 
 Changes to the sync workflow/scripts on the default branch also trigger verification automatically. After 45 quiet days, a no-change maintenance commit keeps public-repository scheduling active; it does not change the app version. Actions must remain enabled and permitted to write contents and dispatch workflows. No personal token or always-on desktop is required.
@@ -59,5 +61,7 @@ The current pipeline follows official Desktop `main`, not only tagged desktop ve
 Workbench 0.2 integrates the Desktop 0.1.4 architecture and subsequent upstream changes through `f09e801`. The shared process supervisor, terminal transport, local launcher, Ollama support, update state and Electron 45 are adopted. Connector registration, per-chat local/GitHub workspaces and sandboxed previews remain Workbench extensions, initialized and stopped by `src/main/services/desktop.ts`.
 
 Open Terminal remains available under its Workbench settings tab and starts for selected project folders. Runtime updates stay pinned to the versions checked by this fork, with a database backup before an automatic WebUI upgrade. The old remote Desktop connection picker, Spotlight and standalone voice window were removed upstream; Open WebUI's own chat and voice features remain available.
+
+Open WebUI 0.13.0 replaces the old controls sidebar with native chat tabs. Workbench adopts those tabs without resetting them when the composer workspace changes. Each Files tab keeps its own terminal and directory context; open file, editor and terminal tabs keep their workspace connections alive. The conditional Workbench **Website preview** action sits beside the corresponding Files tab and leaves Open WebUI's native preview, browser, terminal and editor features intact. Browser regressions exercise the actual components shipped in the runtime wheel.
 
 The upstream and fork both used versions `0.1.x`. Their release notes are kept separately: this repository's Changelog records Workbench releases, and [the Desktop 0.1 notes](desktop-upstream-changelog.md) preserve the integrated upstream notes.

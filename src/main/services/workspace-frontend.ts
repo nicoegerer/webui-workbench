@@ -55,6 +55,15 @@ export function patchWorkspaceFileNav(code: string, map: SourceMap): string | nu
   )
   if (sourceIndex < 0) return null
   const source = map.sourcesContent[sourceIndex]
+  // 0.13 gives each native tab its own terminal and context. Preserve that
+  // implementation, including per-tab directory restoration and editor state.
+  if (
+    source?.includes('effectiveTerminalId = terminalId ?? $selectedTerminalId') &&
+    source.includes('terminalContext.terminalId === effectiveTerminalId') &&
+    source.includes('terminalContext.currentDirectory') &&
+    source.includes(': serverPath;')
+  )
+    return code
   const oldInitialization = source?.includes("const useServerPath = !!chatId || savedPath === '/';")
   const currentInitialization = source?.includes(
     'terminalContext && terminalContext.terminalId === $selectedTerminalId'

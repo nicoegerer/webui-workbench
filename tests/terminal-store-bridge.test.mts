@@ -101,6 +101,22 @@ function setup(fetchOverride?: typeof fetch): Fixture {
   return { stores, calls, bridge }
 }
 
+test('ChatTabs opens the selected workspace without null selection or pruning native editors', async () => {
+  const h = setup()
+  const tabs = writable<boolean | 'files'>(false)
+  const bridge = createTerminalStoreBridge(
+    { ...h.stores, showTabs: tabs },
+    async () => Response.json([{ id: 'desktop-ws-white' }]),
+    () => ''
+  )
+  assert.equal(await bridge.select('desktop-ws-white', () => true, { context: 'same-chat' }), true)
+  assert.deepEqual(h.stores.selectedTerminalId.changes, ['desktop-ws-white'])
+  assert.equal(tabs.value, 'files')
+  assert.deepEqual(h.stores.showControls.changes, [])
+  bridge.hideFiles()
+  assert.equal(tabs.value, false)
+})
+
 test('same-chat turns preserve hidden Files while a website preview is open', async () => {
   const h = setup()
   await h.bridge.select('desktop-ws-test', () => true, { context: 'chat-a' })

@@ -60,6 +60,49 @@ test('unrelated assets remain untouched and changed upstream contracts fail expl
   )
 })
 
+test('Open WebUI 0.13 retains native per-tab cwd restoration without rewriting its code', () => {
+  const map = {
+    ...sourceMap,
+    sourcesContent: [
+      '$: effectiveTerminalId = terminalId ?? $selectedTerminalId;\nsavedPath =\n terminalContext && terminalContext.terminalId === effectiveTerminalId\n ? terminalContext.currentDirectory\n : serverPath;'
+    ],
+    names: ['savedPath'],
+    mappings: 'IAAAA'
+  }
+  const original = 'put(S,C()&&C().terminalId===get(F)?C().currentDirectory:cwd),next=1;'
+  const patched = patchWorkspaceFileNav(original, map)!
+  assert.equal(patched, original, 'Keep the upstream reactive setter and per-tab context intact')
+  const cell = { value: '/old' }
+  const initialize = new Function('put', 'S', 'C', 'get', 'F', 'cwd', 'let next; ' + patched)
+  for (const [terminalId, expected] of [
+    ['same', '/restored'],
+    ['other', '/server']
+  ]) {
+    initialize(
+      (target: { value: string }, value: string) => {
+        target.value = value
+      },
+      cell,
+      () => ({ terminalId: 'same', currentDirectory: '/restored' }),
+      (value: { value: string }) => value.value,
+      { value: terminalId },
+      '/server'
+    )
+    assert.equal(cell.value, expected)
+  }
+  assert.equal(patchWorkspaceFileNav(patched, map), patched)
+  assert.throws(
+    () =>
+      patchWorkspaceFileNav(original, {
+        ...map,
+        sourcesContent: [
+          map.sourcesContent[0].replace('terminalContext.currentDirectory', 'otherContext')
+        ]
+      }),
+    /changed/
+  )
+})
+
 test('stored short, regional and unknown languages always have a shipped fallback', () => {
   const available = ['de-DE', 'en-GB', 'en-US', 'fr-FR', 'pt-BR']
   for (const [locale, expected] of [
