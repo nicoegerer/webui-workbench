@@ -320,6 +320,33 @@ test('45 quiet days keep scheduling alive without source changes or another rele
   assert.equal(result.version, '0.1.0')
 })
 
+test('a fully formatted prepared release does not require an empty release commit', (t) => {
+  const f = fixture(t)
+  f.git('checkout', '-b', 'prepared', 'origin/managed-services')
+  for (const [file, value] of [
+    ['package.json', { name: 'fixture', version: '0.2.0' }],
+    ['package-lock.json', { version: '0.2.0', packages: { '': { version: '0.2.0' } } }]
+  ])
+    f.write(file, JSON.stringify(value, null, 2) + '\n')
+  f.write(
+    'CHANGELOG.md',
+    '# Changelog\n\n## [0.2.0] - 2026-11-03\n\nPrepared port\n\n## [0.0.20]\n\nOfficial release\n'
+  )
+  f.git(
+    'update-ref',
+    'refs/remotes/origin/managed-services',
+    f.commit('formatted prepared release')
+  )
+  f.git('checkout', 'release')
+  assert.deepEqual(prepareSync(f.cwd, 'v0.11.1'), {
+    changed: true,
+    version: '0.2.0',
+    backend: '0.11.1'
+  })
+  assert.equal(f.git('status', '--porcelain'), '')
+  assert.equal(prepareSync(f.cwd, 'v0.11.1').changed, false)
+})
+
 test('maintenance refuses local changes and invalid timestamps', (t) => {
   const f = fixture(t)
   assert.throws(() => keepSyncActive(f.cwd, NaN), /timestamp/)
@@ -363,6 +390,10 @@ test('workflow explicitly dispatches releases and keeps the default branch curre
   assert.ok(source.includes('--atomic'))
   assert.ok(source.includes('--repo open-webui/open-webui'))
   assert.ok(source.indexOf('npm run test:ipc') < source.indexOf('git push --atomic'))
+  assert.ok(
+    source.includes('git show origin/managed-services:.github/scripts/prepare-upstream-sync.mjs')
+  )
+  assert.ok(source.includes('node "$RUNNER_TEMP/prepare-upstream-sync.mjs" "$BACKEND_TAG"'))
 })
 
 test('every gh operation targets an explicit repository after adding upstream', () => {

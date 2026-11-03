@@ -55,8 +55,10 @@ jobs:
       - name: Prepare release candidate from both official projects
         id: candidate
         run: |
+          # The release checkout can still contain the previous sync implementation.
+          git show origin/managed-services:.github/scripts/prepare-upstream-sync.mjs > "$RUNNER_TEMP/prepare-upstream-sync.mjs"
           BACKEND_TAG=$(gh release view --repo open-webui/open-webui --json tagName --jq .tagName)
-          node .github/scripts/prepare-upstream-sync.mjs "$BACKEND_TAG"
+          node "$RUNNER_TEMP/prepare-upstream-sync.mjs" "$BACKEND_TAG"
 
       - name: Verify candidate before publishing any branch
         # Also verify one-time setup changes even if upstream has no new commit.

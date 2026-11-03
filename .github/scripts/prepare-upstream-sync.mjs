@@ -208,7 +208,9 @@ export function prepareSync(cwd, backendTag) {
     )
   }
   git('add', 'package.json', 'package-lock.json', 'CHANGELOG.md', runtimePath)
-  git('commit', '-m', `chore: release v${version}`)
+  if (git('diff', '--cached', '--name-only')) {
+    git('commit', '-m', `chore: release v${version}`)
+  }
   return { changed: true, version, backend: runtime.openWebUI }
 }
 
