@@ -19,6 +19,11 @@ extraResources:
 asarUnpack:
   - resources/**
   - node_modules/node-pty/**
+electronFuses:
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 win:
   executableName: webui-workbench
 nsis:
@@ -26,6 +31,7 @@ nsis:
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  createStartMenuShortcut: true
 mac:
   target:
     - target: dmg
@@ -64,14 +70,16 @@ linux:
 deb:
   artifactName: ${name}_${arch}.${ext}
 snap:
+  # Keep native dependencies compatible with the Linux x64 build runner.
+  base: core22
   artifactName: ${name}_${arch}.${ext}
 appImage:
   artifactName: ${name}_${arch}.${ext}
 flatpak:
   base: org.electronjs.Electron2.BaseApp
-  baseVersion: '23.08'
+  baseVersion: '25.08'
   runtime: org.freedesktop.Platform
-  runtimeVersion: '23.08'
+  runtimeVersion: '25.08'
   sdk: org.freedesktop.Sdk
   artifactName: ${name}.flatpak
   finishArgs:

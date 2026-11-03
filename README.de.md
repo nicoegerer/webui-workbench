@@ -16,7 +16,7 @@ Ein **Community-Fork von [Open WebUI Desktop](https://github.com/open-webui/desk
 ## Einstieg
 
 1. Passenden Installer aus **diesem** Repository installieren.
-2. Lokale Open-WebUI-Instanz einrichten oder deine eigene Instanz verbinden.
+2. Die mitgelieferte lokale Open-WebUI-Instanz einrichten; llama.cpp und Ollama sind optionale lokale Modell-Laufzeiten.
 3. Einen Modellanbieter konfigurieren. Zugangsdaten und kostenpflichtige Abos sind nicht enthalten.
 4. Zunächst einen normalen Chat testen, dann nur benötigte Dienste hinzufügen.
 5. Für Dateiarbeit neben dem Eingabefeld einen lokalen Ordner oder ein Cloud-Repository auswählen.

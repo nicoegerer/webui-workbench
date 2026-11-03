@@ -1,13 +1,20 @@
 // @ts-nocheck
 
-/** Model cache: <userData>/models/<repo-slug>/<filename>. */
+/**
+ * Reusable Hugging Face utility module.
+ * Downloads files from HF repos, manages a local model cache,
+ * and provides listing/deletion of cached models.
+ *
+ * Cache dir: <userData>/models/<repo-slug>/<filename>
+ */
 
 import * as fs from 'fs'
 import * as path from 'path'
 import log from 'electron-log'
 
-import { getInstallDir, downloadFileWithProgress } from './index'
+import { getInstallDir, downloadFileWithProgress, verifyFileChecksum } from './index'
 
+// ─── Types ──────────────────────────────────────────────
 
 export interface HfModel {
   repo: string
@@ -23,6 +30,7 @@ export interface HfDownloadProgress {
   totalBytes: number
 }
 
+// ─── Paths ──────────────────────────────────────────────
 
 const getHfCacheDir = (): string => {
   const dir = path.join(getInstallDir(), 'models')
@@ -59,10 +67,25 @@ const getHfCacheDir = (): string => {
   return dir
 }
 
-const repoSlug = (repo: string): string => repo.replace(/\//g, '--')
+const repoSlug = (repo: string): string => {
+  if (typeof repo !== 'string' || !/^[\w-]+\/[\w][\w.-]*$/.test(repo)) {
+    throw new Error('Invalid Hugging Face repository')
+  }
+  return repo.replace('/', '--')
+}
+
+const getModelPath = (repo: string, filename: string): string => {
+  const slug = repoSlug(repo)
+  if (typeof filename !== 'string' || !/\.gguf$/i.test(filename) ||
+      !filename.split('/').every((part) => /^[\w][\w.+ -]*$/.test(part))) {
+    throw new Error('Invalid GGUF filename')
+  }
+  return path.join(getHfCacheDir(), slug, filename)
+}
 
 const getManifestPath = (): string => path.join(getHfCacheDir(), 'manifest.json')
 
+// ─── Manifest ───────────────────────────────────────────
 
 const readManifest = (): HfModel[] => {
   const p = getManifestPath()
@@ -78,6 +101,7 @@ const writeManifest = (models: HfModel[]): void => {
   fs.writeFileSync(getManifestPath(), JSON.stringify(models, null, 2))
 }
 
+// ─── Public API ─────────────────────────────────────────
 
 const activeDownloads = new Map<string, AbortController>()
 
@@ -96,6 +120,7 @@ export const cancelDownload = (repo?: string, filename?: string): void => {
       activeDownloads.delete(key)
     }
   } else {
+    // Cancel all
     for (const ctrl of activeDownloads.values()) {
       ctrl.abort()
     }
@@ -103,11 +128,18 @@ export const cancelDownload = (repo?: string, filename?: string): void => {
   }
 }
 
+/**
+ * List all downloaded models.
+ */
 export const listModels = (): HfModel[] => {
   const manifest = readManifest()
+  // Filter out entries whose files no longer exist
   return manifest.filter((m) => fs.existsSync(m.filepath))
 }
 
+/**
+ * Get the cache directory path (so runtimes can reference it).
+ */
 export const getModelsDir = (): string => {
   const dir = path.join(getInstallDir(), 'models')
   if (!fs.existsSync(dir)) {
@@ -132,88 +164,36 @@ export const downloadModel = async (
   token?: string,
   expectedSize?: number
 ): Promise<string> => {
-  const slug = repoSlug(repo)
-  const repoDir = path.join(getHfCacheDir(), slug)
-  if (!fs.existsSync(repoDir)) {
-    fs.mkdirSync(repoDir, { recursive: true })
-  }
-
-  const destPath = path.join(repoDir, filename)
-
-  if (fs.existsSync(destPath)) {
-    log.info(`[huggingface] Already cached: ${destPath}`)
-    return destPath
-  }
-
-  const downloadUrl = `https://huggingface.co/${repo}/resolve/main/${encodeURIComponent(filename)}`
-
-  log.info(`[huggingface] Downloading ${repo}/${filename}`)
-  log.info(`[huggingface] URL: ${downloadUrl}`)
-
-  const headers: Record<string, string> = {}
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
+  const destPath = getModelPath(repo, filename)
   const key = downloadKey(repo, filename)
   activeDownloads.get(key)?.abort()
-
-  const abortController = new AbortController()
-  activeDownloads.set(key, abortController)
-  const { signal } = abortController
-
-  const response = await fetch(downloadUrl, {
-    headers,
-    redirect: 'follow',
-    signal
-  })
-
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download ${repo}/${filename}: ${response.status} ${response.statusText}`
-    )
-  }
-
-  const contentLength = parseInt(response.headers.get('content-length') ?? '0', 10)
-  const totalBytes = contentLength || expectedSize || 0
-  const reader = response.body?.getReader()
-  if (!reader) {
-    throw new Error('Response body is not readable')
-  }
-
-  const tmpPath = destPath + '.tmp'
-  const writeStream = fs.createWriteStream(tmpPath)
-  let downloadedBytes = 0
+  const controller = new AbortController()
+  activeDownloads.set(key, controller)
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
 
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      writeStream.write(Buffer.from(value))
-      downloadedBytes += value.byteLength
-
-      if (onProgress && totalBytes > 0) {
-        onProgress({
-          percent: (downloadedBytes / totalBytes) * 100,
-          downloadedBytes,
-          totalBytes
-        })
+    const files = await getRepoFiles(repo, token, controller.signal)
+    const file = files.find((file) => file.filename === filename)
+    if (!file?.sha256) throw new Error('Model has no SHA-256 checksum')
+    if (fs.existsSync(destPath)) {
+      try {
+        await verifyFileChecksum(destPath, file.sha256)
+        return destPath
+      } catch {
+        controller.signal.throwIfAborted()
       }
     }
-  } catch (err) {
-    writeStream.end()
-    try { fs.unlinkSync(tmpPath) } catch {}
-    activeDownloads.delete(downloadKey(repo, filename))
-    throw err
+    fs.mkdirSync(path.dirname(destPath), { recursive: true })
+    const downloadUrl = `https://huggingface.co/${repo}/resolve/main/${filename.split('/').map(encodeURIComponent).join('/')}`
+    await downloadFileWithProgress(downloadUrl, destPath, (percent, downloadedBytes, totalBytes) => {
+      if (!totalBytes && expectedSize) percent = downloadedBytes / expectedSize * 100
+      onProgress?.({ percent, downloadedBytes, totalBytes: totalBytes || expectedSize || 0 })
+    }, controller.signal, file.sha256, headers)
   } finally {
-    writeStream.end()
-    await new Promise((resolve) => writeStream.on('finish', resolve))
+    if (activeDownloads.get(key) === controller) activeDownloads.delete(key)
   }
 
-  fs.renameSync(tmpPath, destPath)
-  activeDownloads.delete(downloadKey(repo, filename))
-
+  // Update manifest
   const manifest = readManifest()
   const existing = manifest.findIndex((m) => m.repo === repo && m.filename === filename)
   const entry: HfModel = {
@@ -234,9 +214,12 @@ export const downloadModel = async (
   return destPath
 }
 
+/**
+ * Delete a downloaded model.
+ */
 export const deleteModel = (repo: string, filename: string): boolean => {
   const slug = repoSlug(repo)
-  const filepath = path.join(getHfCacheDir(), slug, filename)
+  const filepath = getModelPath(repo, filename)
 
   try {
     if (fs.existsSync(filepath)) {
@@ -247,10 +230,12 @@ export const deleteModel = (repo: string, filename: string): boolean => {
     return false
   }
 
+  // Remove from manifest
   const manifest = readManifest()
   const updated = manifest.filter((m) => !(m.repo === repo && m.filename === filename))
   writeManifest(updated)
 
+  // Clean up empty repo dir
   const repoDir = path.join(getHfCacheDir(), slug)
   try {
     const remaining = fs.readdirSync(repoDir)
@@ -263,11 +248,15 @@ export const deleteModel = (repo: string, filename: string): boolean => {
   return true
 }
 
+/**
+ * Get info about a specific model.
+ */
 export const getModelInfo = (repo: string, filename: string): HfModel | null => {
   const manifest = readManifest()
   return manifest.find((m) => m.repo === repo && m.filename === filename) ?? null
 }
 
+// ─── HF API Integration ────────────────────────────────
 
 export interface HfRepoResult {
   id: string            // e.g. "ggml-org/gemma-3-1b-it-GGUF"
@@ -282,9 +271,12 @@ export interface HfRepoResult {
 export interface HfFileInfo {
   filename: string
   size: number          // bytes
-  lfs?: { size: number }
+  sha256?: string
 }
 
+/**
+ * Search HF for GGUF model repos.
+ */
 export const searchModels = async (
   query: string,
   token?: string
@@ -317,14 +309,19 @@ export const searchModels = async (
   }))
 }
 
+/**
+ * List GGUF files in a HF repo.
+ */
 export const getRepoFiles = async (
   repo: string,
-  token?: string
+  token?: string,
+  signal?: AbortSignal
 ): Promise<HfFileInfo[]> => {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const response = await fetch(`https://huggingface.co/api/models/${repo}`, { headers })
+  repoSlug(repo)
+  const response = await fetch(`https://huggingface.co/api/models/${repo}?blobs=true`, { headers, signal })
   if (!response.ok) {
     throw new Error(`Failed to fetch repo info: ${response.status} ${response.statusText}`)
   }
@@ -332,11 +329,13 @@ export const getRepoFiles = async (
   const data = await response.json()
   const siblings = data.siblings ?? []
 
+  // Filter to only GGUF files
   return siblings
     .filter((f: any) => f.rfilename?.endsWith('.gguf'))
     .map((f: any) => ({
       filename: f.rfilename,
-      size: f.lfs?.size ?? f.size ?? 0
+      size: f.lfs?.size ?? f.size ?? 0,
+      sha256: f.lfs?.sha256
     }))
     .sort((a: HfFileInfo, b: HfFileInfo) => a.size - b.size)
 }

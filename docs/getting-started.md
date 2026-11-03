@@ -4,16 +4,16 @@
 
 ## 1. Install the fork
 
-Download the matching installer from [WebUI Workbench releases](https://github.com/nicoegerer/webui-workbench/releases). The version suffix `workbench.N` identifies this distribution.
+Download the matching installer from [WebUI Workbench releases](https://github.com/nicoegerer/webui-workbench/releases). Workbench uses its own version and update feed.
 
 New profiles start without connections or connectors. Existing upstream installations and profiles are not imported. Do not point two running instances at one database or install directory.
 
-## 2. Choose where Open WebUI runs
+## 2. Start the managed Open WebUI
 
-- **Local:** use the first-run setup to install the managed runtime. Initial setup requires internet access and disk space for Python/packages. The standard local port is 8080; change it if another server uses it.
-- **Remote:** add the URL of an Open WebUI server you control. You need a valid login there. Desktop-managed connector/workspace integration targets the managed local runtime; do not assume your remote server can reach desktop loopback endpoints.
+- Use the first-run setup to install the managed local runtime. Initial setup requires internet access and disk space for Python/packages. The standard local port is 8080; change it if another server uses it.
+- Desktop 0.1 uses a single local launcher and a terminal dock for Open WebUI, llama.cpp and Ollama. Workbench retains its connector and workspace settings alongside that launcher.
 
-The desktop's **Connections** page chooses an Open WebUI server. It is not the place to add an OpenAI-compatible model API.
+Configure remote model APIs inside Open WebUI's administrator settings. Saved legacy Desktop server URLs are no longer opened by the new launcher; their configuration is retained on disk.
 
 ## 3. Add a model
 

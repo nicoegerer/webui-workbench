@@ -1,0 +1,42 @@
+name: Verify Workbench
+
+on:
+  pull_request:
+    branches: [managed-services, release]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and regressions (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    env:
+      OPEN_WEBUI_FRONTEND: ${{ runner.temp }}/workbench-frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run test:ipc
+      - run: npm run build
+      - run: python .github/scripts/check-runtime-contract.py --frontend-output "${{ env.OPEN_WEBUI_FRONTEND }}"
+      - name: Exercise real Chromium and published WebUI components
+        if: runner.os == 'Windows'
+        run: node --experimental-strip-types --test tests/workspace-preview.browser.mts tests/workspace-switch.browser.mts tests/settings-locales.browser.mts tests/service-settings.browser.mts

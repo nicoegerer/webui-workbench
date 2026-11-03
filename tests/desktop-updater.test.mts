@@ -19,7 +19,12 @@ const flush = async (): Promise<void> => {
 }
 
 type CheckResult = { downloadPromise: Promise<unknown> }
-type UpdaterApi = { initUpdater: (window: unknown) => void; checkForUpdates: () => Promise<void> }
+type UpdaterApi = {
+  initUpdater: (send: (type: string) => void, automatic: boolean) => void
+  checkForUpdates: () => Promise<void>
+  setAutomaticUpdates: (automatic: boolean) => void
+  getUpdateState: () => { status: string }
+}
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type -- Keep inferred test-fixture types.
 const fixture = (packaged = true) => {
@@ -46,12 +51,8 @@ const fixture = (packaged = true) => {
     allowPrerelease: false,
     allowDowngrade: true
   })
-  const window = {
-    isDestroyed: () => false,
-    webContents: {
-      isDestroyed: () => false,
-      send: (_channel: string, data: { type: string }) => events.push(data.type)
-    }
+  const window = (type: string): void => {
+    events.push(type)
   }
   const mod = { exports: {} as UpdaterApi }
   new Function(
@@ -60,6 +61,7 @@ const fixture = (packaged = true) => {
     'exports',
     'setInterval',
     'clearInterval',
+    'process',
     built.outputFiles![0].text
   )(
     (name: string) =>
@@ -83,7 +85,8 @@ const fixture = (packaged = true) => {
     },
     (timer: { cleared: boolean }) => {
       timer.cleared = true
-    }
+    },
+    { platform: 'linux', env: { APPIMAGE: '/fixture/app.AppImage' }, resourcesPath: '/fixture' }
   )
   return {
     api: mod.exports,
@@ -103,7 +106,7 @@ const fixture = (packaged = true) => {
 
 test('packaged fork downloads automatically, checks periodically and never forces a restart', async () => {
   const f = fixture()
-  f.api.initUpdater(f.window)
+  f.api.initUpdater(f.window, true)
   await flush()
   assert.equal(f.checks(), 1)
   assert.equal(f.updater.autoDownload, true)
@@ -112,23 +115,27 @@ test('packaged fork downloads automatically, checks periodically and never force
   assert.equal(f.updater.allowDowngrade, false)
   assert.equal(f.timers[0].delay, 6 * 60 * 60 * 1000)
   assert.equal(f.timers[0].unrefed, true)
-  f.updater.emit('update-downloaded', {})
-  assert.ok(f.events.includes('update:downloaded'))
-  assert.equal(f.installs(), 0, 'download must not interrupt the current chat')
   f.timers[0].callback()
   await flush()
   assert.equal(f.checks(), 2)
-  f.api.initUpdater(f.window)
+  f.api.initUpdater(f.window, true)
   assert.equal(f.timers.length, 1)
   assert.equal(f.updater.listenerCount('update-available'), 1)
-  f.app.emit('before-quit')
+  f.updater.emit('update-downloaded', { version: '0.2.0' })
+  assert.ok(f.events.includes('update:state'))
+  assert.equal(f.api.getUpdateState().status, 'downloaded')
+  assert.equal(f.installs(), 0, 'download must not interrupt the current chat')
+  f.timers[0].callback()
+  await flush()
+  assert.equal(f.checks(), 2, 'periodic checks preserve an update waiting for app exit')
+  f.app.emit('will-quit')
   assert.equal(f.timers[0].cleared, true)
 })
 
 test('download failures are handled and the next automatic check retries', async () => {
   const f = fixture()
   f.setCheck(async () => ({ downloadPromise: Promise.reject(new Error('offline')) }))
-  f.api.initUpdater(f.window)
+  f.api.initUpdater(f.window, true)
   await flush()
   assert.equal(f.warnings.length, 1)
   assert.equal(f.installs(), 0)
@@ -145,7 +152,7 @@ test('manual and scheduled checks share an in-flight download', async () => {
     finish = resolve
   })
   f.setCheck(async () => ({ downloadPromise: downloading }))
-  f.api.initUpdater(f.window)
+  f.api.initUpdater(f.window, true)
   const manual = f.api.checkForUpdates()
   f.timers[0].callback()
   assert.equal(f.checks(), 1)
@@ -157,8 +164,20 @@ test('manual and scheduled checks share an in-flight download', async () => {
 
 test('development sessions do not check or download updates', async () => {
   const f = fixture(false)
-  f.api.initUpdater(f.window)
+  f.api.initUpdater(f.window, true)
   await f.api.checkForUpdates()
   assert.equal(f.checks(), 0)
   assert.equal(f.timers.length, 0)
+})
+
+test('the automatic download preference can be disabled and re-enabled without extra listeners', async () => {
+  const f = fixture()
+  f.api.initUpdater(f.window, false)
+  await flush()
+  assert.equal(f.updater.autoDownload, false)
+  f.api.setAutomaticUpdates(true)
+  await flush()
+  assert.equal(f.updater.autoDownload, true)
+  assert.equal(f.checks(), 2)
+  assert.equal(f.updater.listenerCount('update-available'), 1)
 })

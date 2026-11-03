@@ -8,7 +8,7 @@ All connections are optional. A fresh profile contains an empty registry. Discov
 
 | You want to connect…                     | Where / how                                                                      |
 | ---------------------------------------- | -------------------------------------------------------------------------------- |
-| An Open WebUI server                     | Desktop Connections                                                              |
+| An Open WebUI server                     | Managed local launcher                                                              |
 | An OpenAI-compatible model endpoint      | Open WebUI administrator model Connections                                       |
 | GitHub                                   | [Workspace access and permissions](workspaces-and-preview.md#github-access)      |
 | A local stdio MCP server                 | Discover → Local connector (mcpo adapter)                                        |

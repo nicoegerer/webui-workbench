@@ -1,7 +1,7 @@
 import { mount, unmount, tick } from 'svelte'
 import { config } from '../../src/renderer/src/lib/stores'
 import Connectors from '../../src/renderer/src/lib/components/Main/Settings/Services/ConnectorSettings.svelte'
-import Terminal from '../../src/renderer/src/lib/components/Main/Settings/OpenTerminal.svelte'
+import Terminal from '../../src/renderer/src/lib/components/Main/Settings/WorkbenchTerminal.svelte'
 import Inference from '../../src/renderer/src/lib/components/Main/Settings/InferenceRuntime.svelte'
 
 const check = (condition: unknown, message: string) => {
@@ -51,6 +51,7 @@ async function run() {
   let info: any = { status: 'stopped', binaryPath: '/fixture/llama-server' }
   window.electronAPI = {
     listManagedServices: async () => [],
+    getLlamaCppAssetName: async () => 'fixture-asset.zip',
     onData: () => () => {
       unsubscriptions++
     },
@@ -146,7 +147,7 @@ async function run() {
         ? target.querySelector<HTMLButtonElement>(
             '[aria-label="settings.terminal.toggleStartOnLaunch"]'
           )
-        : target.querySelector<HTMLButtonElement>('button.w-9')
+        : target.querySelector<HTMLButtonElement>('[aria-label="settings.inference.startOnLaunch"]')
     await until(switchButton)
     check(starts === 0 && !profile[key].enabled, 'Mount enabled a service by default')
     switchButton()!.click()

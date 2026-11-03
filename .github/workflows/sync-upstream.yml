@@ -11,6 +11,8 @@ on:
       - '.github/scripts/check-public-distribution.mjs'
       - '.github/scripts/check-runtime-contract.py'
       - 'tests/upstream-sync.test.mjs'
+      - 'package.json'
+      - 'src/shared/runtime-versions.json'
   schedule:
     - cron: '17 6 * * *'
 

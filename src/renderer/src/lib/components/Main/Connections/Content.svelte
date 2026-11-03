@@ -1,12 +1,21 @@
 <script lang="ts">
+  import ArrowRightIcon from 'iconoir/icons/arrow-right.svg?raw'
+  import GlobeIcon from 'iconoir/icons/globe.svg?raw'
+  import RestartIcon from 'iconoir/icons/restart.svg?raw'
+  import WarningCircleIcon from 'iconoir/icons/warning-circle.svg?raw'
+  import type {
+    WebviewTag,
+    DidFailLoadEvent,
+    ConsoleMessageEvent,
+    IpcMessageEvent,
+    PageTitleUpdatedEvent
+  } from 'electron'
+  import { handleGuestRequest } from '../../../guest-requests'
   import { onMount } from 'svelte'
   import { fade, fly } from 'svelte/transition'
   import { config, serverInfo, appState } from '../../../stores'
   import i18n from '../../../i18n'
-  import LocalInstall from '../../Setup/LocalInstall.svelte'
   import GetStartedModal from './GetStartedModal.svelte'
-  import AddConnectionModal from './AddConnectionModal.svelte'
-  import landingVideo from '../../../../assets/landing.mp4'
   import { buildWorkspaceChipScript } from '../../../guest/workspace-chip'
   import { connectorToolId } from '../../../../../../shared/services/tool-servers'
   import WorkspacePreview from './WorkspacePreview.svelte'
@@ -15,55 +24,40 @@
     type WorkspacePreviewBounds
   } from '../../../../../../shared/workspace-preview'
 
-  interface Props {
-    sidebarOpen: boolean
-    view: string
-    activeConnectionId: string
-    connectingId: string
-    openConnections: Map<string, string>
-    localConn: any
+  import logoImage from '../../../assets/images/splash.png'
+  import landingVideo from '../../../../assets/landing.mp4'
+
+  let {
+    serverUrl,
+    connecting,
+    canRefresh = $bindable(false),
+    launchError,
+    localInstalled,
+    installPhase,
+    installError,
+    installStatus,
+    toastVisible,
+    onStartInstall,
+    onOpenWebUI,
+    onOpenTerminal
+  }: {
+    serverUrl: string
+    connecting: boolean
+    canRefresh?: boolean
+    launchError: string
     localInstalled: boolean
-    remoteConnections: any[]
     installPhase: string
     installError: string
     installStatus: string
     toastVisible: boolean
-    url: string
-    connecting: boolean
-    error: string
-    autoInstall: boolean
     onStartInstall: (options?: {
-      installOpenTerminal?: boolean
       installLlamaCpp?: boolean
+      installOllama?: boolean
       installDir?: string
     }) => void
-    onAddConnection: () => void
-    onSetView: (v: string) => void
-    showAddConnectionModal: boolean
-  }
-
-  let {
-    sidebarOpen,
-    view,
-    activeConnectionId,
-    connectingId,
-    openConnections,
-    localConn,
-    localInstalled,
-    remoteConnections,
-    installPhase = $bindable('idle'),
-    installError = $bindable(''),
-    installStatus = $bindable(''),
-    toastVisible = $bindable(false),
-    url = $bindable(''),
-    connecting = $bindable(false),
-    error = $bindable(''),
-    autoInstall = $bindable(false),
-    onStartInstall,
-    onAddConnection,
-    onSetView,
-    showAddConnectionModal = $bindable(false)
-  }: Props = $props()
+    onOpenWebUI: () => void
+    onOpenTerminal: () => void
+  } = $props()
 
   let showGetStartedModal = $state(false)
 
@@ -75,13 +69,12 @@
     $appState?.startsWith('install-failed:') ? $appState.substring('install-failed:'.length) : null
   )
 
-  let webviewLoading: Map<string, boolean> = $state(new Map())
-
-  let webviewErrors: Map<string, { code: number; description: string; url: string }> = $state(
-    new Map()
-  )
-
-  let contentPreloadPath: string = $state('')
+  let webviewLoading = $state(false)
+  let webviewBackground = $state<string | null>(null)
+  let webviewTitle = $state('')
+  let webviewError = $state<{ code: number; description: string; url: string } | null>(null)
+  let contentPreloadPath = $state('')
+  let webview: WebviewTag | undefined
   let previewSelection = $state<{
     terminalId: string
     label: string
@@ -94,41 +87,9 @@
 
   const closePreview = (): void => {
     previewSelection = null
-    const wv = document.querySelector(
-      'webview[partition="persist:connection-local"]'
-    ) as Electron.WebviewTag | null
+    const wv = webview
     void wv?.executeJavaScript('window.__desktopWorkspaceChip?.closePreview?.()').catch(() => {})
   }
-
-  onMount(() => {
-    const openIntegrations = async () => {
-      previewSelection = null
-      integrationError = ''
-      const wv = document.querySelector('webview[partition="persist:connection-local"]') as any
-      if (!wv || !openConnections.has('local')) {
-        window.dispatchEvent(new CustomEvent('desktop:webui-integrations-opened'))
-        integrationError = 'Bitte zuerst die lokale Open-WebUI-Verbindung öffnen.'
-        return
-      }
-      try {
-        const opened = await wv.executeJavaScript(
-          'window.__desktopWorkspaceChip?.openIntegrations?.()'
-        )
-        if (!opened) throw new Error('Store unavailable')
-        window.dispatchEvent(new CustomEvent('desktop:webui-integrations-opened'))
-      } catch {
-        window.dispatchEvent(new CustomEvent('desktop:webui-integrations-opened'))
-        integrationError =
-          'Open-WebUI-Einstellungen konnten nicht geöffnet werden. Öffne dort Einstellungen → Admin → Integrationen.'
-      }
-    }
-    window.addEventListener('desktop:open-webui-integrations', openIntegrations)
-    return () => window.removeEventListener('desktop:open-webui-integrations', openIntegrations)
-  })
-
-  $effect(() => {
-    if (view !== 'connected' || activeConnectionId !== 'local') previewSelection = null
-  })
 
   /** Inject in the guest main world to reach its fetch; failures must leave the chat usable. */
   const injectWorkspaceChip = async (wv: any): Promise<void> => {
@@ -148,269 +109,290 @@
     }
   }
 
-  const serverStarting = $derived(
-    localInstalled &&
-      ($serverInfo?.status === 'starting' ||
-        ($serverInfo?.status === 'running' && !$serverInfo?.reachable))
-  )
-
-  const activeWebviewError = $derived(
-    view === 'connected' && activeConnectionId
-      ? (webviewErrors.get(activeConnectionId) ?? null)
-      : null
-  )
-
-  const isLoading = $derived(
-    connectingId !== '' ||
-      (serverStarting && activeConnectionId === 'local') ||
-      (view === 'connected' &&
-        !activeWebviewError &&
-        webviewLoading.get(activeConnectionId) === true)
-  )
-
-  const retryActiveWebview = () => {
-    const wv = document.querySelector(
-      `webview[partition="persist:connection-${activeConnectionId}"]`
-    ) as any
-    if (wv?.reload) {
-      webviewErrors.delete(activeConnectionId)
-      webviewErrors = new Map(webviewErrors)
-      wv.reload()
-    }
-  }
-
-  const openActiveInBrowser = () => {
-    const connUrl = openConnections.get(activeConnectionId)
-    if (connUrl) {
-      window.electronAPI.openInBrowser(connUrl)
-    }
-  }
-
-  onMount(async () => {
-    contentPreloadPath = await window.electronAPI.getContentPreloadPath()
-
-    const observer = new MutationObserver(() => {
-      const container = document.querySelector('.content-webview-container')
-      if (!container) return
-      const webviews = container.querySelectorAll('webview')
-      webviews.forEach((wv: any) => {
-        if (wv._loadListenerAttached) return
-        wv._loadListenerAttached = true
-        const connId = wv.getAttribute('partition')?.replace('persist:connection-', '') ?? ''
-        if (!connId) return
-
-        wv.addEventListener('did-start-loading', () => {
-          if (connId === 'local') previewSelection = null
-          webviewLoading.set(connId, true)
-          webviewLoading = new Map(webviewLoading)
-        })
-
-        wv.addEventListener('did-stop-loading', () => {
-          webviewLoading.set(connId, false)
-          webviewLoading = new Map(webviewLoading)
-          // The workspace chip belongs to the bundled Open WebUI only; a remote
-          // server has neither our terminals nor our connectors.
-          if (connId === 'local') void injectWorkspaceChip(wv)
-        })
-
-        wv.addEventListener('did-fail-load', (event: any) => {
-          // Ignore sub-resource failures and aborted navigations (-3)
-          if (event.errorCode === -3 || event.isMainFrame === false) return
-          webviewErrors.set(connId, {
-            code: event.errorCode,
-            description: event.errorDescription || 'Unknown error',
-            url: event.validatedURL || ''
-          })
-          webviewErrors = new Map(webviewErrors)
-        })
-
-        wv.addEventListener('did-navigate', () => {
-          if (webviewErrors.has(connId)) {
-            webviewErrors.delete(connId)
-            webviewErrors = new Map(webviewErrors)
-          }
-        })
-
-        wv.addEventListener('crashed', () => {
-          webviewErrors.set(connId, {
-            code: -1,
-            description: 'crashed',
-            url: ''
-          })
-          webviewErrors = new Map(webviewErrors)
-        })
-
-        // Keep guest diagnostics limited to warnings and errors.
-        wv.addEventListener('console-message', (event: any) => {
-          if (event.level >= 2) {
-            console.warn(`[webview:${connId}]`, event.message)
-          }
-        })
-
-        // If this webview was created before the preload path resolved
-        // (race between auto-connect and async IPC), the preload didn't
-        // attach.  Force a reload now so it picks up the correct preload.
-        if (contentPreloadPath && wv.getAttribute('preload') !== contentPreloadPath) {
-          wv.setAttribute('preload', contentPreloadPath)
-          wv.reload()
-        }
-
-        wv.addEventListener('ipc-message', async (event: any) => {
-          if (event.channel === 'webview:send') {
-            const requestData = event.args?.[0]
-            if (!requestData) return
-
-            if (requestData.type === 'token:update' && requestData.token) {
-              window.electronAPI.setAuthToken?.(requestData.token)
-              return
-            }
-
-            try {
-              let response: unknown
-              if (String(requestData.type).startsWith('workspacePreview') && connId !== 'local') {
-                response = {
-                  ok: false,
-                  code: 'INVALID_WORKSPACE',
-                  error: 'Local workspace required'
-                }
-              } else if (requestData.type === 'workspacePreviewState' && connId === 'local') {
-                if (
-                  requestData.pending ||
-                  requestData.terminalId !== workspaceState.terminalId ||
-                  requestData.chatKey !== workspaceState.chatKey
-                )
-                  previewSelection = null
-                workspaceState = requestData
-                response = { ok: true }
-              } else if (requestData.type === 'workspacePreviewShow' && connId === 'local') {
-                if (
-                  view === 'connected' &&
-                  activeConnectionId === 'local' &&
-                  !workspaceState.pending &&
-                  ['local', 'cloud'].includes(workspaceState.mode) &&
-                  requestData.terminalId === workspaceState.terminalId &&
-                  requestData.chatKey === workspaceState.chatKey &&
-                  typeof requestData.entryPath === 'string' &&
-                  validWorkspacePreviewBounds(requestData.bounds)
-                ) {
-                  previewSelection = {
-                    terminalId: workspaceState.terminalId,
-                    chatKey: workspaceState.chatKey,
-                    label: workspaceState.label,
-                    entryPath: requestData.entryPath,
-                    bounds: requestData.bounds
-                  }
-                }
-                response = { ok: !!previewSelection }
-              } else if (requestData.type === 'workspacePreviewHide' && connId === 'local') {
-                previewSelection = null
-                response = { ok: true }
-              } else {
-                response = await window.electronAPI[requestData.type]?.(requestData)
-              }
-              if (requestData._requestId) {
-                wv.send('desktop:response', {
-                  _responseId: requestData._requestId,
-                  data: response
-                })
-              }
-            } catch (e) {
-              console.error('webview:send handler error:', e)
-            }
-          } else if (event.channel === 'webview:load') {
-            const page = event.args?.[0]
-            if (page) onSetView(page === 'home' ? 'welcome' : page)
-          } else if (event.channel === 'webview:event') {
-            const payload = event.args?.[0]
-            if (!payload?.type) return
-
-            if (payload.type === 'theme:update') {
-              const webuiTheme = payload.data?.theme ?? 'system'
-
-              let desktopTheme: string
-              if (webuiTheme === 'system') {
-                desktopTheme = 'system'
-              } else if (webuiTheme.includes('dark')) {
-                desktopTheme = 'dark'
-              } else {
-                desktopTheme = 'light'
-              }
-
-              let resolved = desktopTheme
-              if (desktopTheme === 'system') {
-                resolved = window.matchMedia('(prefers-color-scheme: dark)').matches
-                  ? 'dark'
-                  : 'light'
-              }
-              document.documentElement.classList.remove('light', 'dark')
-              document.documentElement.classList.add(resolved)
-
-              await window.electronAPI.setConfig({ theme: desktopTheme })
-              config.set(await window.electronAPI.getConfig())
-            }
-          }
-        })
-      })
-    })
-
-    const target = document.querySelector('.content-webview-container')
-    if (target) {
-      observer.observe(target, { childList: true, subtree: true })
-    }
-
-    return () => observer.disconnect()
+  $effect(() => {
+    if (!serverUrl) previewSelection = null
   })
+
+  onMount(() => {
+    const openIntegrations = async (): Promise<void> => {
+      previewSelection = null
+      integrationError = ''
+      try {
+        if (!webview || !serverUrl) throw new Error('Open the local WebUI first.')
+        const opened = await webview.executeJavaScript(
+          'window.__desktopWorkspaceChip?.openIntegrations?.()'
+        )
+        if (!opened) throw new Error('Open WebUI integrations are not available yet.')
+      } catch (error) {
+        integrationError = error instanceof Error ? error.message : String(error)
+      } finally {
+        window.dispatchEvent(new CustomEvent('desktop:webui-integrations-opened'))
+      }
+    }
+    window.addEventListener('desktop:open-webui-integrations', openIntegrations)
+    return () => window.removeEventListener('desktop:open-webui-integrations', openIntegrations)
+  })
+
+  const activeWebviewError = $derived(serverUrl ? webviewError : null)
+  const isLoading = $derived(connecting || (!!serverUrl && !activeWebviewError && webviewLoading))
+  let startupLine = $state('')
+  const loadingStatus = $derived(startupLine || installStatus)
+
+  $effect(() => {
+    startupLine = ''
+    if (!isLoading) return undefined
+    return window.electronAPI.onTerminalLine('server', (line: string) => {
+      startupLine = line
+    })
+  })
+
+  export const refresh = (): void => {
+    if (!canRefresh || !webview) return
+    webviewError = null
+    webview.reload()
+  }
+  const openActiveInBrowser = (): void => {
+    void window.electronAPI.openInBrowser(serverUrl)
+  }
+
+  onMount(() => {
+    let disposed = false
+    window.electronAPI.getContentPreloadPath().then((path: string) => {
+      if (!disposed) contentPreloadPath = path
+    })
+    return () => {
+      disposed = true
+    }
+  })
+
+  function attachWebview(wv: WebviewTag): { destroy: () => void } {
+    webview = wv
+    previewSelection = null
+    workspaceState = { terminalId: '', label: '', chatKey: '', mode: '', pending: false }
+    webviewBackground = null
+    webviewTitle = ''
+    canRefresh = false
+    webviewError = null
+    webviewLoading = true
+    let disposed = false
+    const origin = new URL(serverUrl).origin
+    const isLocalGuest = (): boolean => {
+      try {
+        return !disposed && new URL(wv.getURL()).origin === origin
+      } catch {
+        return false
+      }
+    }
+    const listeners: [string, (event: Event) => void][] = []
+    const listen = <E extends Event>(name: string, callback: (event: E) => void): void => {
+      const listener = callback as (event: Event) => void
+      wv.addEventListener(name, listener)
+      listeners.push([name, listener])
+    }
+    const send = (event: unknown): void => {
+      try {
+        wv.send('desktop:event', event)
+      } catch {
+        /* Webview is navigating. */
+      }
+    }
+    // Only local model events cross into WebUI; replay state when its listener is ready.
+    const unsubscribe = window.electronAPI.onData((event) => {
+      if (event.type === 'connections:openai' || event.type === 'models:refresh') send(event)
+      if (event.type === 'managed-services:changed' && isLocalGuest()) void injectWorkspaceChip(wv)
+    })
+    listen('did-start-loading', () => {
+      webviewLoading = true
+      previewSelection = null
+    })
+    listen('dom-ready', () => {
+      canRefresh = true
+      webviewTitle = wv.getTitle()
+    })
+    listen('page-title-updated', (event: PageTitleUpdatedEvent) => {
+      webviewTitle = event.title
+    })
+    listen('did-stop-loading', () => {
+      webviewLoading = false
+      if (isLocalGuest()) void injectWorkspaceChip(wv)
+    })
+    listen('did-fail-load', (event: DidFailLoadEvent) => {
+      if (event.errorCode === -3 || event.isMainFrame === false) return
+      canRefresh = true
+      webviewError = {
+        code: event.errorCode,
+        description: event.errorDescription || $i18n.t('error.unknown'),
+        url: event.validatedURL || ''
+      }
+    })
+    listen('did-navigate', () => {
+      webviewError = null
+    })
+    listen('render-process-gone', () => {
+      webviewError = { code: -1, description: 'crashed', url: '' }
+    })
+    listen('console-message', (event: ConsoleMessageEvent) => {
+      if (event.level >= 2) console.warn('[webview]', event.message)
+    })
+    listen('ipc-message', async (event: IpcMessageEvent) => {
+      if (event.channel === 'webview:ready') {
+        const runtimes = await Promise.all([
+          window.electronAPI.getLlamaCppInfo(),
+          window.electronAPI.getOllamaInfo()
+        ])
+        for (const [index, info] of runtimes.entries()) {
+          if (!disposed && info?.reachable && info.url) {
+            send({
+              type: 'connections:openai',
+              data: {
+                action: 'add',
+                url: `${info.url}/v1`,
+                config: { provider: index === 0 ? 'llama.cpp' : 'ollama', connection_type: 'local' }
+              }
+            })
+          }
+        }
+      } else if (event.channel === 'webview:send') {
+        const request = event.args?.[0]
+        if (!request) return
+        let response: unknown
+        try {
+          if (!isLocalGuest()) throw new Error('The local WebUI is required')
+          if (request.type === 'workspacePreviewState') {
+            if (
+              request.pending ||
+              request.terminalId !== workspaceState.terminalId ||
+              request.chatKey !== workspaceState.chatKey
+            )
+              previewSelection = null
+            workspaceState = request
+            response = { ok: true }
+          } else if (request.type === 'workspacePreviewShow') {
+            if (
+              serverUrl &&
+              !workspaceState.pending &&
+              ['local', 'cloud'].includes(workspaceState.mode) &&
+              request.terminalId === workspaceState.terminalId &&
+              request.chatKey === workspaceState.chatKey &&
+              typeof request.entryPath === 'string' &&
+              validWorkspacePreviewBounds(request.bounds)
+            ) {
+              previewSelection = {
+                ...workspaceState,
+                entryPath: request.entryPath,
+                bounds: request.bounds
+              }
+            }
+            response = { ok: !!previewSelection }
+          } else if (request.type === 'workspacePreviewHide') {
+            previewSelection = null
+            response = { ok: true }
+          } else response = await handleGuestRequest(window.electronAPI, request)
+        } catch {
+          response = { error: 'Desktop request rejected' }
+        }
+        if (!disposed && request._requestId) {
+          try {
+            wv.send('desktop:response', { _responseId: request._requestId, data: response })
+          } catch {
+            /* Webview is navigating. */
+          }
+        }
+      } else if (event.channel === 'webview:event') {
+        const payload = event.args?.[0]
+        if (payload?.type !== 'theme:update') return
+        const webuiTheme = typeof payload.data?.theme === 'string' ? payload.data.theme : 'system'
+        const theme =
+          webuiTheme === 'system' ? 'system' : webuiTheme.includes('dark') ? 'dark' : 'light'
+        const resolved = ['dark', 'light'].includes(payload.data?.resolvedTheme)
+          ? payload.data.resolvedTheme
+          : theme === 'system'
+            ? window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+            : theme
+        const background = payload.data?.background
+        if (typeof background === 'string' && CSS.supports('color', background)) {
+          webviewBackground = background
+        }
+        document.documentElement.classList.remove('light', 'dark')
+        document.documentElement.classList.add(resolved)
+        if ($config?.theme !== theme) {
+          config.update((current) => ({ ...current, theme }))
+          await window.electronAPI.setConfig({ theme })
+        }
+      }
+    })
+    return {
+      destroy() {
+        disposed = true
+        unsubscribe()
+        for (const [name, callback] of listeners) wv.removeEventListener(name, callback)
+        webview = undefined
+        previewSelection = null
+        webviewTitle = ''
+        canRefresh = false
+      }
+    }
+  }
 </script>
 
 <div
-  class="flex-1 flex flex-col min-w-0 overflow-clip bg-[#eee] dark:bg-[#111] border-t relative content-webview-container {sidebarOpen
-    ? 'border-l border-black/[0.08] dark:border-white/[0.08] rounded-tl-xl'
-    : 'border-black/[0.08] dark:border-white/[0.10]'}"
+  class="flex-1 flex flex-col min-h-0 min-w-0 overflow-clip bg-[#eee] dark:bg-[#111] relative content-webview-container"
 >
-  <div
-    class="relative flex flex-1 min-h-0 min-w-0"
-    style:display={view === 'connected' ? 'flex' : 'none'}
-  >
-    {#each [...openConnections] as [connId, connUrl] (connId)}
+  {#if serverUrl && contentPreloadPath}
+    <div
+      class="webview-inset flex shrink-0 items-center justify-center bg-white dark:bg-[#171717]"
+      style:height="var(--window-drag-height)"
+      style:padding-inline="var(--window-title-padding)"
+      style:background-color={webviewBackground}
+    >
+      <span class="truncate text-[11px] font-medium opacity-60" title={webviewTitle}
+        >{webviewTitle}</span
+      >
+    </div>
+    <div class="relative flex flex-1 min-h-0 min-w-0">
       <webview
-        src={connUrl}
+        src={serverUrl}
         class="flex-1 min-h-0 border-none"
-        style="display: {view === 'connected' && activeConnectionId === connId ? 'flex' : 'none'}"
-        partition="persist:connection-{connId}"
+        style="display: flex"
+        partition="persist:connection-local"
         preload={contentPreloadPath}
+        use:attachWebview
         allowpopups
       ></webview>
-    {/each}
-    {#if previewSelection}
-      <div
-        class="absolute z-10 min-w-0 min-h-0 overflow-hidden"
-        style:left={`${previewSelection.bounds.left * 100}%`}
-        style:top={`${previewSelection.bounds.top * 100}%`}
-        style:width={`${previewSelection.bounds.width * 100}%`}
-        style:height={`${previewSelection.bounds.height * 100}%`}
-      >
-        {#key previewSelection.chatKey + ':' + previewSelection.terminalId}
-          <WorkspacePreview
-            terminalId={previewSelection.terminalId}
-            label={previewSelection.label}
-            initialEntry={previewSelection.entryPath}
-            embedded={true}
-            onClose={closePreview}
-          />
-        {/key}
-      </div>
-    {/if}
-  </div>
-  {#if integrationError}
-    <div
-      role="alert"
-      class="absolute top-4 left-4 right-4 z-30 rounded-xl bg-white dark:bg-[#252525] p-4 text-sm shadow-lg"
-    >
-      {integrationError}
-      <button class="ml-3 underline" onclick={() => (integrationError = '')}>Schließen</button>
+      {#if previewSelection}
+        <div
+          class="absolute z-10 min-w-0 min-h-0 overflow-hidden"
+          style:left={`${previewSelection.bounds.left * 100}%`}
+          style:top={`${previewSelection.bounds.top * 100}%`}
+          style:width={`${previewSelection.bounds.width * 100}%`}
+          style:height={`${previewSelection.bounds.height * 100}%`}
+        >
+          {#key previewSelection.chatKey + ':' + previewSelection.terminalId}
+            <WorkspacePreview
+              terminalId={previewSelection.terminalId}
+              label={previewSelection.label}
+              initialEntry={previewSelection.entryPath}
+              embedded={true}
+              onClose={closePreview}
+            />
+          {/key}
+        </div>
+      {/if}
+      {#if integrationError}
+        <div
+          role="alert"
+          class="absolute top-4 left-4 right-4 z-30 rounded-xl bg-white dark:bg-[#252525] p-4 text-sm shadow-lg"
+        >
+          {integrationError}
+          <button class="ml-3 underline" onclick={() => (integrationError = '')}>Schließen</button>
+        </div>
+      {/if}
     </div>
   {/if}
 
+  <!-- Error overlay when webview fails to load -->
   {#if activeWebviewError}
     <div
       class="absolute inset-0 z-20 flex items-center justify-center bg-[#eee] dark:bg-[#111]"
@@ -421,33 +403,17 @@
           class="mx-auto mb-4 w-10 h-10 rounded-full bg-black/[0.04] dark:bg-white/[0.06] flex items-center justify-center"
         >
           {#if activeWebviewError.code === -1}
-            <svg
-              class="w-5 h-5 opacity-30"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="1.5"
+            <span
+              aria-hidden="true"
+              class="inline-flex shrink-0 [&>svg]:size-full w-5 h-5 opacity-30"
+              >{@html WarningCircleIcon}</span
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-              />
-            </svg>
           {:else}
-            <svg
-              class="w-5 h-5 opacity-30"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="1.5"
+            <span
+              aria-hidden="true"
+              class="inline-flex shrink-0 [&>svg]:size-full w-5 h-5 opacity-30"
+              >{@html GlobeIcon}</span
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"
-              />
-            </svg>
           {/if}
         </div>
         <div class="text-[14px] font-medium mb-1 opacity-80">
@@ -466,7 +432,7 @@
         <div class="flex gap-2 justify-center">
           <button
             class="px-4 py-2 rounded-xl text-[13px] font-medium bg-black dark:bg-white text-white dark:text-black border-none cursor-pointer transition hover:bg-gray-800 dark:hover:bg-gray-100 active:scale-[0.98]"
-            onclick={retryActiveWebview}
+            onclick={refresh}
           >
             {$i18n.t('common.retry')}
           </button>
@@ -481,21 +447,33 @@
     </div>
   {/if}
 
+  <!-- Loading overlay for webview -->
   {#if isLoading}
     <div
       class="absolute inset-0 z-10 flex items-center justify-center bg-[#eee] dark:bg-[#111]"
       transition:fade={{ duration: 200 }}
     >
-      <div class="flex flex-col items-center gap-3">
+      <div class="flex w-full min-w-0 flex-col items-center gap-3 px-6">
         <div
           class="w-6 h-6 rounded-full border-2 border-black/10 dark:border-white/15 border-t-black/50 dark:border-t-white/50 animate-spin"
         ></div>
-        <span class="text-[11px] opacity-30">{$i18n.t('common.loading')}</span>
+        <div class="flex w-full min-w-0 flex-col items-center gap-1.5" role="status">
+          <span class="text-[12px] opacity-90">{$i18n.t('common.loading')}</span>
+          {#if loadingStatus}
+            <button
+              type="button"
+              class="max-w-[min(240px,100%)] truncate font-mono text-[11px] opacity-25 hover:opacity-40 focus-visible:opacity-40"
+              title={loadingStatus}
+              aria-label={$i18n.t('logs.expand')}
+              onclick={onOpenTerminal}>{loadingStatus}</button
+            >
+          {/if}
+        </div>
       </div>
     </div>
   {/if}
 
-  {#if view !== 'connected'}
+  {#if !serverUrl}
     {#if insufficientStorage}
       <div class="px-5 py-2.5 flex items-center gap-3 bg-red-500/[0.06] border-b border-red-500/10">
         <div class="flex-1">
@@ -520,10 +498,8 @@
             window.electronAPI
               .installPython()
               .then(() => appState.set('ready'))
-              .catch((e: any) => {
-                appState.set(
-                  `install-failed:${e?.message || 'Python installation failed. Please try again.'}`
-                )
+              .catch((e) => {
+                appState.set(`install-failed:${e?.message || $i18n.t('error.pythonInstallFailed')}`)
               })
           }}
         >
@@ -554,10 +530,8 @@
             window.electronAPI
               .installPython()
               .then(() => appState.set('ready'))
-              .catch((e: any) => {
-                appState.set(
-                  `install-failed:${e?.message || 'Python installation failed. Please try again.'}`
-                )
+              .catch((e) => {
+                appState.set(`install-failed:${e?.message || $i18n.t('error.pythonInstallFailed')}`)
               })
           }}
         >
@@ -566,147 +540,128 @@
       </div>
     {:else if isInitializing}
       <div class="px-5 py-1.5 text-[11px] opacity-25">
-        {$i18n.t('setup.settingUp')}{$serverInfo?.status ? ` ${$serverInfo.status}` : ''}
+        {$i18n.t('setup.settingUp')}{#if $serverInfo?.status}
+          {$i18n.t(`common.${$serverInfo.status === 'started' ? 'running' : $serverInfo.status}`)}
+        {/if}
       </div>
     {/if}
 
     <div class="flex-1 flex items-center justify-center px-6 relative overflow-hidden">
-      {#if view === 'welcome'}
-        {#if remoteConnections.length > 0 || localInstalled}
-          <div class="text-center max-w-[320px]" in:fade={{ duration: 200 }}>
-            <div class="text-lg opacity-80 mb-1.5">{$i18n.t('app.name')}</div>
-            <div class="text-[12px] opacity-30 mb-6">
-              {$i18n.t('main.selectConnection')}
-            </div>
+      {#if localInstalled}
+        <div class="text-center max-w-[320px]" in:fade={{ duration: 200 }}>
+          <div class="text-lg opacity-80 mb-1.5">{$i18n.t('app.name')}</div>
+          <div class="text-[12px] opacity-30 mb-6">
+            {$i18n.t('main.localReady')}
           </div>
-        {:else}
-          <div class="absolute inset-0 bg-[#fafafa] dark:bg-[#111]">
-            <video
-              autoplay
-              muted
-              loop
-              playsinline
-              class="absolute inset-0 w-full h-full object-cover opacity-30 dark:opacity-40 pointer-events-none"
-            >
-              <source src={landingVideo} type="video/mp4" />
-            </video>
+          <button
+            class="px-4 py-2 rounded-xl text-[13px] bg-black dark:bg-white text-white dark:text-black border-none disabled:opacity-40"
+            onclick={onOpenWebUI}
+            disabled={connecting || installPhase === 'working'}>{$i18n.t('main.openWebUI')}</button
+          >
+          {#if launchError}<div class="mt-3 text-[12px] opacity-60" role="alert">
+              {launchError}
+            </div>{/if}
+          {#if installPhase === 'working' && installStatus}<div class="mt-3 text-[12px] opacity-40">
+              {installStatus}
+            </div>{/if}
+        </div>
+      {:else}
+        <!-- Theme-responsive hero section -->
+        <div class="absolute inset-0 bg-white dark:bg-black">
+          <!-- Video background -->
+          <video
+            autoplay
+            muted
+            loop
+            playsinline
+            class="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          >
+            <source src={landingVideo} type="video/mp4" />
+          </video>
 
-            <div
-              class="absolute inset-0 bg-gradient-to-t from-[#fafafa] dark:from-[#111] via-[#fafafa]/30 dark:via-[#111]/30 to-transparent pointer-events-none"
-            ></div>
+          <!-- Gradient overlay -->
+          <div
+            class="absolute inset-0 bg-gradient-to-b from-white/10 via-white/90 via-75% to-white dark:from-black/10 dark:via-black/90 dark:to-black pointer-events-none"
+          ></div>
 
-            <div class="absolute bottom-0 left-0 right-0 p-10" in:fade={{ duration: 300 }}>
-              <div class="max-w-sm">
-                <div
-                  class="text-3xl font-medium mb-3 tracking-tight text-[#1d1d1f] dark:text-[#fafafa]"
+          <img
+            src={logoImage}
+            alt=""
+            draggable="false"
+            class="absolute left-[34px] top-[48px] w-[30px] h-[30px] dark:invert pointer-events-none"
+          />
+
+          <!-- Content positioned bottom-left -->
+          <div
+            class="absolute bottom-0 left-0 right-0 px-[40px] py-[56px]"
+            in:fade={{ duration: 300 }}
+          >
+            <div class="max-w-[440px]">
+              <div class="text-3xl font-medium mb-3 tracking-tight text-black dark:text-white">
+                {$i18n.t('app.name')}
+              </div>
+              <div class="text-base opacity-60 mb-8 leading-relaxed text-black dark:text-white">
+                {$i18n.t('main.localDescription')}
+              </div>
+
+              {#if !localInstalled}
+                <button
+                  class="group inline-flex items-center {installPhase === 'working'
+                    ? 'justify-start'
+                    : 'justify-between'} gap-2.5 w-[220px] max-w-full h-[36px] bg-black dark:bg-white px-4 rounded-none text-white dark:text-black text-[13px] border-none disabled:opacity-50"
+                  onclick={() => {
+                    if (installPhase === 'error') {
+                      onStartInstall()
+                    } else {
+                      showGetStartedModal = true
+                    }
+                  }}
+                  disabled={installPhase === 'working'}
                 >
-                  {$i18n.t('app.name')}
-                </div>
-                <div
-                  class="text-base opacity-50 mb-8 leading-relaxed text-[#1d1d1f] dark:text-[#fafafa]"
-                >
-                  {$i18n.t('main.heroDescription')}
-                </div>
-
-                {#if !localInstalled}
-                  <button
-                    class="inline-flex items-center gap-2 bg-black dark:bg-white px-6 py-2 rounded-xl text-white dark:text-black text-[13px] transition hover:bg-gray-800 dark:hover:bg-gray-100 border-none disabled:opacity-50"
-                    onclick={() => {
-                      if (installPhase === 'error') {
-                        onStartInstall()
-                      } else {
-                        showGetStartedModal = true
-                      }
-                    }}
-                    disabled={installPhase === 'working'}
-                  >
-                    {#if installPhase === 'working'}
-                      <div
-                        class="w-3.5 h-3.5 rounded-full border-2 border-white/30 dark:border-black/30 border-t-white dark:border-t-black animate-spin"
-                      ></div>
-                      {$i18n.t('common.installing')}
-                    {:else if installPhase === 'error'}
-                      {$i18n.t('common.retry')}
-                      <svg
-                        class="h-3.5 w-3.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M20.015 4.356v4.992m0 0h-4.992m4.993 0l-3.181-3.183a8.25 8.25 0 00-13.803 3.7"
-                        />
-                      </svg>
-                    {:else}
-                      {$i18n.t('main.getStarted')}
-                      <svg
-                        class="h-3.5 w-3.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M17 8l4 4m0 0l-4 4m4-4H3"
-                        />
-                      </svg>
-                    {/if}
-                  </button>
-
-                  {#if installPhase === 'working' && installStatus}
+                  {#if installPhase === 'working'}
                     <div
-                      class="mt-3 text-[12px] opacity-40 font-mono line-clamp-1"
-                      in:fade={{ duration: 200 }}
+                      class="w-3.5 h-3.5 rounded-full border-2 border-white/30 dark:border-black/30 border-t-white dark:border-t-black animate-spin"
+                    ></div>
+                    {$i18n.t('common.installing')}
+                  {:else if installPhase === 'error'}
+                    {$i18n.t('common.retry')}
+                    <span
+                      aria-hidden="true"
+                      class="inline-flex shrink-0 [&>svg]:size-full h-3.5 w-3.5"
+                      >{@html RestartIcon}</span
                     >
-                      {installStatus}
-                    </div>
+                  {:else}
+                    {$i18n.t('main.getStarted')}
+                    <span
+                      aria-hidden="true"
+                      class="inline-flex shrink-0 [&>svg]:size-full h-3.5 w-3.5 motion-safe:transition-transform duration-200 ease-out motion-safe:group-hover:translate-x-1"
+                      >{@html ArrowRightIcon}</span
+                    >
                   {/if}
-                {/if}
+                </button>
 
-                {#if installPhase !== 'working'}
-                  <div class="mt-6">
-                    <button
-                      class="text-sm opacity-40 hover:opacity-70 transition bg-transparent border-none text-[#1d1d1f] dark:text-[#fafafa]"
-                      onclick={() => {
-                        showAddConnectionModal = true
-                      }}
-                    >
-                      {$i18n.t('setup.connectToServer')}
-                    </button>
+                {#if installPhase === 'working' && installStatus}
+                  <div
+                    class="mt-3 text-[12px] opacity-40 font-mono line-clamp-1"
+                    in:fade={{ duration: 200 }}
+                  >
+                    {installStatus}
                   </div>
                 {/if}
-              </div>
+              {/if}
             </div>
           </div>
-        {/if}
+        </div>
+      {/if}
 
-        {#if toastVisible && installError}
-          <div
-            class="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 backdrop-blur-sm text-white text-[12px] px-4 py-2 rounded-xl shadow-lg"
-            in:fly={{ y: -10, duration: 200 }}
-            out:fade={{ duration: 150 }}
-          >
-            {installError}
-          </div>
-        {/if}
-      {:else if view === 'install'}
-        <div class="w-full max-w-[260px]">
-          <LocalInstall
-            autoStart={autoInstall}
-            onBack={() => {
-              autoInstall = false
-              onSetView('welcome')
-            }}
-            onComplete={async () => {
-              config.set(await window.electronAPI.getConfig())
-              onSetView('welcome')
-            }}
-          />
+      <!-- Error toast -->
+      {#if toastVisible && installError}
+        <div
+          class="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 backdrop-blur-sm text-white text-[12px] px-4 py-2 rounded-xl shadow-lg"
+          in:fly={{ y: -10, duration: 200 }}
+          out:fade={{ duration: 150 }}
+        >
+          {installError}
         </div>
       {/if}
     </div>
@@ -720,21 +675,6 @@
       }}
       onCancel={() => {
         showGetStartedModal = false
-      }}
-    />
-  {/if}
-
-  {#if showAddConnectionModal}
-    <AddConnectionModal
-      bind:url
-      bind:connecting
-      bind:error
-      onConnect={() => {
-        onAddConnection()
-      }}
-      onCancel={() => {
-        showAddConnectionModal = false
-        error = ''
       }}
     />
   {/if}

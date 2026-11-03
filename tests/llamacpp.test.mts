@@ -1,40 +1,66 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFileSync } from 'node:fs'
-import { runInNewContext } from 'node:vm'
-import path from 'node:path'
-import ts from 'typescript'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
 
+const require = createRequire(import.meta.url)
+const lifecycle = await build({
+  entryPoints: [fileURLToPath(new URL('../src/main/process/managedService.ts', import.meta.url))],
+  bundle: true,
+  write: false,
+  platform: 'node',
+  format: 'esm'
+})
+const { ManagedService } = await import(
+  'data:text/javascript;base64,' + Buffer.from(lifecycle.outputFiles[0].text).toString('base64')
+)
+const built = await build({
+  entryPoints: [fileURLToPath(new URL('../src/main/utils/llamacpp.ts', import.meta.url))],
+  bundle: true,
+  write: false,
+  platform: 'node',
+  format: 'cjs',
+  external: [
+    'tar',
+    'electron-log',
+    './index',
+    './huggingface',
+    '../process/managedService',
+    '../process/nativePty'
+  ]
+})
+
+interface TestChild {
+  pid: number
+  alive: boolean
+  kills: boolean[]
+  exit(): void
+  onData(): { dispose(): void }
+  onExit(callback: (event: object) => void): { dispose(): void }
+  write(): void
+  resize(): void
+  kill(force: boolean): void
+}
+interface LlamaApi {
+  startLlamaCpp(): Promise<{ pid: number | null; url: string | null }>
+  stopLlamaCpp(): Promise<void>
+  getLlamaCppInfo(): { pid: number | null; url: string | null; status: string }
+}
+const noop = (): void => undefined
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type -- Preserve inferred fixture control types.
 function fixture() {
-  const children: any[] = []
-  const processSignals: Array<{ pid: number; signal?: string | number }> = []
-  let healthy = true
-  let failConfig = false
+  const children: TestChild[] = []
+  let healthy = true,
+    failConfig = false,
+    exitOnSpawn = false
   let configGate: Promise<void> | undefined
-  let exitOnSpawn = false
-  class Lock {
-    held = false
-    acquire() {
-      if (this.held) return false
-      this.held = true
-      return true
-    }
-    release() {
-      this.held = false
-    }
-  }
   const config = { llamaCpp: { enabled: false, version: 'fixture-version', variant: 'cpu' } }
   const stubs = {
-    fs: { existsSync: () => true },
-    path,
-    child_process: {},
+    fs: { existsSync: () => true, readdirSync: () => [] },
     tar: {},
-    'electron-log': { info() {}, warn() {}, error() {} },
+    'electron-log': { info: noop, warn: noop, error: noop },
     './huggingface': { getModelsDir: () => '/fixture/models' },
-    './service-lock': {
-      ServiceLock: Lock,
-      isProcessAlive: (pid: number) => children.some((c) => c.pid === pid && c.alive)
-    },
     './index': {
       async getConfig() {
         await configGate
@@ -45,23 +71,36 @@ function fixture() {
         assert.fail('No preference changes expected')
       },
       getInstallDir: () => '/fixture',
-      portInUse: async () => false
+      getProcessEnv: (env: unknown) => env,
+      findAvailablePort: async () => 18881
     },
-    'node-pty': {
-      spawn() {
-        const child = {
+    '../process/managedService': {
+      ManagedService,
+      waitForReady: async (_probe: unknown, signal: AbortSignal) => {
+        signal.throwIfAborted()
+        if (!healthy) throw new Error('fixture service did not become ready')
+      }
+    },
+    '../process/nativePty': {
+      spawnPty() {
+        const child: TestChild = {
           pid: children.length + 6000,
           alive: true,
-          onData() {},
+          kills: [],
+          exit: noop,
+          onData: () => ({ dispose: noop }),
+          write: noop,
+          resize: noop,
           onExit(callback: (event: object) => void) {
             child.exit = () => {
               child.alive = false
               callback({ exitCode: 1 })
             }
-            if (exitOnSpawn) child.exit()
+            if (exitOnSpawn) queueMicrotask(child.exit)
+            return { dispose: noop }
           },
-          exit() {},
-          kill() {
+          kill(force: boolean) {
+            child.kills.push(force)
             child.exit()
           }
         }
@@ -70,75 +109,45 @@ function fixture() {
       }
     }
   }
-  const source = readFileSync(new URL('../src/main/utils/llamacpp.ts', import.meta.url), 'utf8')
-  const exports = {}
-  runInNewContext(
-    ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2022,
-        esModuleInterop: true
-      }
-    }).outputText,
-    {
-      exports,
-      require: (id: string) => {
-        assert.ok(id in stubs, id)
-        return stubs[id]
-      },
-      process: {
-        platform: 'win32',
-        arch: 'x64',
-        env: {},
-        kill(pid: number, signal?: string | number) {
-        processSignals.push({ pid, signal })
-          const child = children.find((c) => c.pid === pid && c.alive)
-          if (!child) throw new Error('not alive')
-          if (signal === 'SIGKILL') child.exit()
-        }
-      },
-      setTimeout: (callback: () => void) => {
-        queueMicrotask(callback)
-        return 0
-      },
-      AbortSignal,
-      fetch: async () => ({ ok: healthy, json: async () => ({ status: 'ok' }) })
-    }
+  const mod = { exports: {} as LlamaApi }
+  new Function('require', 'module', 'exports', 'process', built.outputFiles[0].text)(
+    (name: string) => stubs[name] ?? require(name),
+    mod,
+    mod.exports,
+    { platform: 'win32', arch: 'x64', env: {} }
   )
   return {
-    api: exports as any,
+    api: mod.exports,
     children,
-    processSignals,
     config,
-    setHealthy: (value: boolean) => {
+    setHealthy(value: boolean) {
       healthy = value
     },
-    failSetup: (value: boolean) => {
+    failSetup(value: boolean) {
       failConfig = value
     },
-    pauseSetup: (gate: Promise<void> | undefined) => {
+    pauseSetup(gate?: Promise<void>) {
       configGate = gate
     },
-    exitDuringStart: () => {
+    exitDuringStart() {
       exitOnSpawn = true
     }
   }
 }
 
-test('concurrent llama.cpp starts share a single ready process even with autostart disabled', async () => {
+test('concurrent llama.cpp starts share the upstream service without enabling autostart', async () => {
   const f = fixture()
   const [first, second] = await Promise.all([f.api.startLlamaCpp(), f.api.startLlamaCpp()])
   assert.equal(first.pid, second.pid)
   assert.equal(f.children.length, 1)
   assert.equal(f.api.getLlamaCppInfo().status, 'started')
   assert.equal((await f.api.startLlamaCpp()).pid, first.pid)
-  assert.equal(f.children.length, 1)
   assert.equal(f.config.llamaCpp.enabled, false)
   await f.api.stopLlamaCpp()
-  assert.deepEqual(f.processSignals, [], 'An observed process exit must not reuse its old PID')
+  assert.equal(f.children[0].alive, false)
 })
 
-test('failed readiness never reports success, cleans up and permits a retry', async () => {
+test('failed readiness cleans up the process and permits an explicit retry', async () => {
   const f = fixture()
   f.setHealthy(false)
   await assert.rejects(f.api.startLlamaCpp(), /did not become ready/)
@@ -151,20 +160,22 @@ test('failed readiness never reports success, cleans up and permits a retry', as
   await f.api.stopLlamaCpp()
 })
 
-test('an early process exit and a setup failure are reported and release the startup guard', async () => {
+test('an early exit or setup failure cannot leave a ready or permanently locked service', async () => {
   const early = fixture()
   early.exitDuringStart()
-  await assert.rejects(early.api.startLlamaCpp(), /exited during startup/)
+  await assert.rejects(early.api.startLlamaCpp(), /Process exited/)
   assert.equal(early.api.getLlamaCppInfo().status, 'failed')
   const setup = fixture()
   setup.failSetup(true)
   await assert.rejects(setup.api.startLlamaCpp(), /fixture setup failure/)
   setup.failSetup(false)
   assert.ok((await setup.api.startLlamaCpp()).url)
+  setup.children[0].exit()
   await setup.api.stopLlamaCpp()
+  assert.deepEqual(setup.children[0].kills, [], 'An observed exit must never signal a reused PID')
 })
 
-test('Stop during setup prevents a late spawn and allows a later explicit start', async () => {
+test('Stop during preparation waits for cancellation and prevents a late spawn', async () => {
   const f = fixture()
   let release!: () => void
   f.pauseSetup(
@@ -175,11 +186,11 @@ test('Stop during setup prevents a late spawn and allows a later explicit start'
   const pending = f.api.startLlamaCpp()
   const rejected = assert.rejects(pending, /cancelled/)
   await new Promise<void>((resolve) => setImmediate(resolve))
-  await f.api.stopLlamaCpp()
+  const stopped = f.api.stopLlamaCpp()
   release()
-  await rejected
+  await Promise.all([stopped, rejected])
   assert.equal(f.children.length, 0)
-  f.pauseSetup(undefined)
+  f.pauseSetup()
   assert.ok((await f.api.startLlamaCpp()).url)
   await f.api.stopLlamaCpp()
 })

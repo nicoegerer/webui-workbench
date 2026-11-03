@@ -170,7 +170,7 @@ test('an explicitly selected terminal version is respected', async () => {
 })
 
 test('cleanup checks live ownership before probing and again before stopping', () => {
-  const main = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8')
+  const main = readFileSync(new URL('../src/main/services/desktop.ts', import.meta.url), 'utf8')
   const handler = main.slice(
     main.indexOf("ipcMain.handle('workspace:chip:keep-alive'"),
     main.indexOf("'workspace:chip:cloud'")

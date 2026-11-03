@@ -8,7 +8,7 @@ WebUI Workbench enthält **keine voreingerichteten Konten, MCPs oder Modellanbie
 
 | Vorhandener Dienst                         | Richtige Einstellung                                                            | Ergebnis                                                                                    |
 | ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Open-WebUI-Server                          | Äußere Desktop-Verbindungen                                                     | Öffnet diesen Chat-Server; richtet keine Modelle oder Werkzeuge ein                         |
+| Open-WebUI-Server                          | Verwalteter lokaler Desktop-Start                                                     | Startet den mitgelieferten lokalen Chat-Server; richtet keine Modellanbieter oder Werkzeuge ein                         |
 | OpenAI-kompatible Modell-API oder Gateway  | Open WebUI → Administrator-Einstellungen → Verbindungen                         | Stellt Chat-Modelle bereit; API-Basisadresse des Anbieters verwenden, häufig mit `/v1`      |
 | Lokaler MCP mit Startbefehl und **stdio**  | Desktop → Einstellungen → Dienste & Konnektoren → Entdecken → Lokaler Konnektor | Startet den MCP über den lokalen Adapter                                                    |
 | Vorhandene **Streamable-HTTP-MCP**-Adresse | Benutzerdefinierter Remote-Konnektor / Remote-MCP                               | Verbindet den Werkzeug-Endpunkt ohne lokale Serverinstallation                              |

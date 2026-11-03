@@ -12,7 +12,7 @@ GitHub displays the relationship to `open-webui/desktop`; this is not an endorse
 
 | Area | Upstream foundation | Fork additions |
 | --- | --- | --- |
-| Desktop | Electron shell, installer/runtime management, server connections, settings and shortcuts | Optional service registry, process management and connector hub |
+| Desktop | Electron shell, local launcher, managed WebUI/llama.cpp/Ollama services, terminal dock, settings and shortcuts | Optional connector registry and workspace lifecycle |
 | Chat | Open WebUI interface, model connections, conversations and tool execution | Injection bridge for deliberately enabled connectors and per-chat workspace selection |
 | File work | Open Terminal runtime and native Files panel | Scoped local processes, stale-path safeguards, workspace switching and lifecycle cleanup |
 | GitHub | GitHub APIs and optional official remote MCP server | Optional CLI account adapter, cloud file browsing, verified commit writes and scoped workflow/Pages actions |
@@ -32,7 +32,7 @@ The default branch is `managed-services`. `main` mirrors official Desktop; `rele
 5. The workflow explicitly starts the release pipeline because pushes made by `GITHUB_TOKEN` do not trigger another push workflow. Users do not need to click Run workflow.
 6. All required platform packaging jobs must pass before release assets and matching update manifests are published.
 
-Routine version/identity overlaps in `package.json` and `package-lock.json` use a constrained three-way merge: fork-owned identity fields stay local, independent official dependency changes are retained, and competing dependency changes fail closed. New Changelog sections are combined only when the existing history and preamble are unchanged. This avoids asking the maintainer to resolve an ordinary version bump without silently preferring fork dependencies or discarding upstream notes.
+Routine version/identity overlaps in `package.json` and `package-lock.json` use a constrained three-way merge: fork-owned identity fields stay local, independent official dependency changes are retained, and competing dependency changes fail closed. Official Desktop release notes are refreshed in [their own snapshot](desktop-upstream-changelog.md); Workbench's Changelog retains its independent version history. This handles overlapping official and fork version numbers without discarding either project's notes. Source and dependency conflicts still stop publication.
 
 Changes to the sync workflow/scripts on the default branch also trigger verification automatically. After 45 quiet days, a no-change maintenance commit keeps public-repository scheduling active; it does not change the app version. Actions must remain enabled and permitted to write contents and dispatch workflows. No personal token or always-on desktop is required.
 
@@ -53,3 +53,11 @@ An upstream update notice may appear before the fork's daily check and builds fi
 Runtime/connector accounts are not authenticated by the public build. A passing release does not guarantee that every provider, account policy or model supports every tool. Windows CI runs extra real-HTTP and isolated-browser regressions; platform packaging is not equivalent to exhaustive manual testing on every OS.
 
 The current pipeline follows official Desktop `main`, not only tagged desktop versions, and stable runtime releases. Read the changelog and CI results before choosing a build for important work.
+
+## Desktop 0.1 port
+
+Workbench 0.2 integrates the Desktop 0.1.4 architecture and subsequent upstream changes through `f09e801`. The shared process supervisor, terminal transport, local launcher, Ollama support, update state and Electron 45 are adopted. Connector registration, per-chat local/GitHub workspaces and sandboxed previews remain Workbench extensions, initialized and stopped by `src/main/services/desktop.ts`.
+
+Open Terminal remains available under its Workbench settings tab and starts for selected project folders. Runtime updates stay pinned to the versions checked by this fork, with a database backup before an automatic WebUI upgrade. The old remote Desktop connection picker, Spotlight and standalone voice window were removed upstream; Open WebUI's own chat and voice features remain available.
+
+The upstream and fork both used versions `0.1.x`. Their release notes are kept separately: this repository's Changelog records Workbench releases, and [the Desktop 0.1 notes](desktop-upstream-changelog.md) preserve the integrated upstream notes.
