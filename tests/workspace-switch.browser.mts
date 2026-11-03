@@ -1,4 +1,4 @@
-/** Actual shipped ChatControls + FileNav, not a reimplementation of their lifecycle. */
+/** Actual shipped ChatTabs/ChatControls + FileNav, not a reimplementation of their lifecycle. */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
@@ -26,6 +26,8 @@ test(
     let controlsFile = '',
       controlsName = '',
       patchedCode = ''
+    let nativeTabs = false
+    const patchedChunks = new Map<string, string>()
     let terminalFile = '',
       terminalName = '',
       terminalCode = ''
@@ -33,13 +35,19 @@ test(
       if (!filename.endsWith('.js.map')) continue
       const map = JSON.parse(await readFile(path.join(chunks, filename), 'utf8'))
       const file = filename.slice(0, -4)
-      const code = await readFile(path.join(chunks, file), 'utf8')
+      const originalCode = await readFile(path.join(chunks, file), 'utf8')
+      const code = process.env.WORKSPACE_TEST_UNPATCHED
+        ? originalCode
+        : (patchWorkspaceFileNav(originalCode, map) ?? originalCode)
+      patchedChunks.set(file, code)
       const lines = code.split('\n')
       const pairs = code
         .slice(code.lastIndexOf('export{') + 7)
         .split('}')[0]
         .split(',')
-      const controls = map.sources.findIndex((s: string) => s.endsWith('/ChatControls.svelte'))
+      const controls = map.sources.findIndex(
+        (s: string) => s.endsWith('/ChatControls.svelte') || s.endsWith('/ChatTabs.svelte')
+      )
       const terminalSource = map.sources.findIndex((s: string) =>
         s.endsWith('/MessageInput/TerminalMenu.svelte')
       )
@@ -83,7 +91,8 @@ test(
           if (
             controls >= 0 &&
             !controlsName &&
-            mapping.source.endsWith('/ChatControls.svelte') &&
+            (mapping.source.endsWith('/ChatControls.svelte') ||
+              mapping.source.endsWith('/ChatTabs.svelte')) &&
             mapping.originalLine === contextLine
           ) {
             const offset =
@@ -93,12 +102,9 @@ test(
             controlsName = [...code.slice(0, offset).matchAll(/function ([\w$]+)\([^)]*\)\{/g)].at(
               -1
             )![1]
+            nativeTabs = mapping.source.endsWith('/ChatTabs.svelte')
             controlsFile = file
-            patchedCode =
-              (process.env.WORKSPACE_TEST_UNPATCHED ? code : patchWorkspaceFileNav(code, map)!) +
-              '\nexport {' +
-              controlsName +
-              ' as TestControls};'
+            patchedCode = code + '\nexport {' + controlsName + ' as TestControls};'
           }
           const name = mapping.name
           if (!name || exports[name]) return
@@ -112,7 +118,8 @@ test(
               'settings',
               'terminalServers',
               'selectedTerminalId',
-              'showControls'
+              'showControls',
+              'showTabs'
             ].includes(name) && mapping.source.endsWith('/src/lib/stores/index.ts')
           if (!isMount && !isStore) return
           const line = lines[mapping.generatedLine - 1]
@@ -141,7 +148,8 @@ test(
     await writeFile(path.join(second, 'second.html'), '<h1>Second</h1>')
     const terminals = [
       { id: 'desktop-first', cwd: first },
-      { id: 'desktop-second', cwd: second }
+      { id: 'desktop-second', cwd: second },
+      { id: 'desktop-gh-fixture', cwd: second }
     ]
     let finish!: (value: { ok: boolean; error?: string; checks?: string[] }) => void
     const result = new Promise<{ ok: boolean; error?: string; checks?: string[] }>((resolve) => {
@@ -175,18 +183,18 @@ test(
       const i18n={subscribe(fn){fn({t:v=>v});return ()=>{}}};
       localStorage.token='test-only';
       const saved=location.search.includes('saved');
-      const props={history:{messages:{}},chatId:saved?'existing-chat':null,models:[],params:{},chatFiles:[]};
+      const props={history:{messages:{}},chatId:saved?'existing-chat':null,models:[],params:{},chatFiles:[],files:[],eventTarget:new EventTarget(),submitPrompt:async()=>{},stopResponse:()=>{},showMessage:()=>{}};
       user.set({role:'admin',permissions:{}});config.set({features:{enable_tool_servers:true},code:{interpreter_engine:'pyodide'}});settings.set({});
       terminalServers.set(${JSON.stringify(terminals.map((t) => ({ id: t.id, url: '/api/v1/terminals/' + t.id })))});
       const app=mount(TestControls,{target:document.getElementById('fixture'),props,context:new Map([['i18n',i18n]])});
-      const bridge=(${createTerminalStoreBridge.toString()})({terminalServers,selectedTerminalId,showControls},fetch,()=> 'test-only');
+      const bridge=(${createTerminalStoreBridge.toString()})({terminalServers,selectedTerminalId,${nativeTabs ? 'showTabs' : 'showControls'}},fetch,()=> 'test-only');
       let selection={terminalId:'',chatKey:'draft',mode:'local',pending:false};let available=true;
       const tab=(${createWorkspacePreviewTab.toString()})(async(type,data)=>{
         if(type==='workspacePreviewInspect')return {available,entryPath:selection.terminalId==='desktop-first'?'first.html':'second.html'};
         if(type==='workspacePreviewShow'){document.getElementById('result').textContent='Preview: '+data.entryPath;return {ok:true}}
         return {ok:true};
       },(_de,en)=>en,()=>tab.update(selection));
-      const choose=async(id,context=saved?'existing-chat':'draft')=>{selection={...selection,pending:true};tab.update(selection);await bridge.select(id,()=>true,{path:id==='desktop-first'?${JSON.stringify(first)}:${JSON.stringify(second)},chatId:props.chatId??undefined,context});selection={terminalId:id,chatKey:context,mode:'local',pending:false};tab.update(selection);};
+      const choose=async(id,context=saved?'existing-chat':'draft')=>{selection={...selection,pending:true};tab.update(selection);await bridge.select(id,()=>true,{path:id==='desktop-gh-fixture'?undefined:id==='desktop-first'?${JSON.stringify(first)}:${JSON.stringify(second)},chatId:props.chatId??undefined,context});selection={terminalId:id,chatKey:context,mode:'local',pending:false};tab.update(selection);};
       document.getElementById('first').onclick=()=>choose('desktop-first');document.getElementById('second').onclick=()=>choose('desktop-second');
       window.addEventListener('error',e=>fetch('/result',{method:'POST',body:JSON.stringify({ok:false,error:e.message})}));
       try{
@@ -194,12 +202,27 @@ test(
         // A Windows runner may clamp the window below the desktop breakpoint.
         // The mobile Drawer portals outside #fixture and has no controls-container ID.
         const text=()=>{
+          const active=document.querySelector('#controls-container button[role=tab][aria-selected=true]');
+          if(active)return document.getElementById(active.getAttribute('aria-controls'))?.textContent||'';
           const files=[...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='Files'&&
             [...button.parentElement.children].some(sibling=>sibling.textContent.trim()==='Controls'));
           return files?.parentElement.parentElement.nextElementSibling?.textContent||'';
         };
         await waitFor(()=>text().includes('first.html'),'First directory did not render');checks.push('First original folder');
+        let nativeEditor;
+        if(${nativeTabs}){
+          document.querySelector('button[aria-label="New tab"]').click();
+          await waitFor(()=>[...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='New File'),'Native New File menu missing');
+          [...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='New File').click();
+          await waitFor(()=>[...document.querySelectorAll('[data-panel-tab]')].find(tab=>tab.textContent.includes('Untitled-1')),'Native untitled editor missing');
+          nativeEditor=[...document.querySelectorAll('[data-panel-tab]')].find(tab=>tab.textContent.includes('Untitled-1'));
+        }
         await choose('desktop-second');
+        if(${nativeTabs}){
+          if(!nativeEditor?.isConnected)throw Error('Workspace switch discarded the native untitled editor');
+          if(document.querySelectorAll('[data-panel-tab^="files:"]').length<2)throw Error('Workspace switch removed another native Files tab');
+          checks.push('Native editor and multiple Files tabs survive workspace switching');
+        }
         await waitFor(()=>text().includes('second.html')&&!text().includes('first.html'),'Draft kept first directory after folder switch');checks.push('Draft switches to second folder');
         await choose('desktop-first','existing-chat');await waitFor(()=>text().includes('first.html')&&!text().includes('second.html'),'Existing chat failed switch');
         await choose('desktop-second','existing-chat');await waitFor(()=>text().includes('second.html')&&!text().includes('first.html'),'Existing chat kept old folder');checks.push('Same chat switches both ways');
@@ -209,8 +232,18 @@ test(
         preview.click();await delay(100);
         if(preview.getAttribute('aria-pressed')!=='true')throw new Error('Preview not selected');
         preview.previousElementSibling.click();if(preview.getAttribute('aria-pressed')!=='false')throw new Error('Files did not close preview');
+        if(${nativeTabs}){
+          preview.click();await delay(100);
+          nativeEditor.querySelector('button[role=tab]').click();
+          await delay(100);
+          if(preview.getAttribute('aria-pressed')!=='false')throw Error('Native editor did not close the Workbench preview');
+          preview.click();await delay(100);
+          if(preview.getAttribute('aria-pressed')!=='true')throw Error('Preview did not reactivate its native Files tab');
+          preview.previousElementSibling.click();
+          checks.push('Native tabs and Workbench website preview coexist');
+        }
         checks.push('Preview beside Files, tab switching works');
-        selection={...selection,terminalId:'desktop-gh-fixture',chatKey:'cloud-chat',mode:'cloud'};tab.update(selection);
+        await choose('desktop-gh-fixture','cloud-chat');selection={...selection,mode:'cloud'};tab.update(selection);
         await waitFor(()=>document.querySelector('[data-desktop-preview-tab]'),'Cloud HTML has no preview tab');
         const cloudPreview=document.querySelector('[data-desktop-preview-tab]');cloudPreview.click();await delay(100);
         if(cloudPreview.getAttribute('aria-pressed')!=='true')throw new Error('Cloud preview did not open');
@@ -336,7 +369,8 @@ test(
               ? patchedCode
               : url.pathname.endsWith('/' + terminalFile)
                 ? terminalCode
-                : await readFile(path.join(frontend!, url.pathname))
+                : (patchedChunks.get(path.basename(url.pathname)) ??
+                  (await readFile(path.join(frontend!, url.pathname))))
           )
           return
         }

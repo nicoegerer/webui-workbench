@@ -80,12 +80,16 @@ async def check_resolver(source):
 
 webui = published_wheel('open-webui', VERSIONS['openWebUI'])
 asyncio.run(check_resolver(webui.read('open_webui/utils/tools.py').decode()))
-# The desktop imports the shipped stores and remounts FileNav by clearing the
-# selected terminal for one Svelte flush. Fail the upstream-sync/release gates
+# The desktop imports the shipped stores. Legacy FileNav needs a remount;
+# native ChatTabs owns its terminal contexts and must retain every open tab.
+# Fail the upstream-sync/release gates
 # when that contract changes; do not silently ship a stale file panel.
 frontend_sources = {}
-wanted = ('src/lib/stores/index.ts', 'src/lib/components/chat/ChatControls.svelte',
-          'src/lib/components/chat/FileNav.svelte', 'src/lib/apis/terminal/index.ts')
+wanted = ('src/lib/stores/index.ts', 'src/lib/components/chat/FileNav.svelte',
+          'src/lib/apis/terminal/index.ts')
+panel_sources = ('src/lib/components/chat/ChatControls.svelte',
+                 'src/lib/components/chat/ChatTabs.svelte')
+panel_source = None
 for name in webui.namelist():
     if not name.endswith('.js.map') or '/_app/immutable/' not in name:
         continue
@@ -97,19 +101,25 @@ for name in webui.namelist():
         for target in wanted:
             if source.endswith(target):
                 frontend_sources[target] = content
-    if len(frontend_sources) == len(wanted):
+        if any(source.endswith(target) for target in panel_sources):
+            panel_source = content
+    if len(frontend_sources) == len(wanted) and panel_source is not None:
         break
-assert len(frontend_sources) == len(wanted), 'Required shipped frontend source maps are missing'
+assert len(frontend_sources) == len(wanted) and panel_source is not None, 'Required shipped frontend source maps are missing'
 stores = frontend_sources[wanted[0]]
-for name in ('terminalServers', 'selectedTerminalId', 'showControls', 'showFileNavPath', 'showFileNavDir', 'tools'):
+for name in ('terminalServers', 'selectedTerminalId', 'showFileNavPath', 'showFileNavDir', 'tools'):
     assert f'export const {name}' in stores, f'Frontend store contract changed: {name}'
-controls = frontend_sources[wanted[1]]
-assert "activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId" in controls
-file_nav = frontend_sources[wanted[2]]
+assert 'export const showControls' in stores or 'export const showTabs' in stores
+if 'export const showTabs' in stores:
+    assert "$showTabs === 'files' && showFilesTab" in panel_source
+    assert 'terminalId={tab.terminalId}' in panel_source and 'initialDirectory=' in panel_source
+else:
+    assert "activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId" in panel_source
+file_nav = frontend_sources[wanted[1]]
 assert 'showFileNavPath.subscribe' in file_nav and 'getCwd(' in file_nav
-cwd_api = frontend_sources[wanted[3]]
+cwd_api = frontend_sources[wanted[2]]
 assert '/files/cwd' in cwd_api and "headers['X-Session-Id'] = sessionId" in cwd_api
-print('Published frontend: terminal remount, file-navigation stores and per-chat cwd contract verified')
+print('Published frontend: terminal-scoped panels, file-navigation stores and per-chat cwd contract verified')
 if args.frontend_output:
     # Only compiled frontend assets into an explicitly selected CI/test directory.
     prefix = 'open_webui/frontend/'

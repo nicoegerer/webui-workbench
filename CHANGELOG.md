@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Ported Workbench to the official Desktop 0.1.4 architecture, including Electron 45, managed process lifecycle, terminal dock, Ollama support and desktop update state.
 - Reconnected optional connectors, local and GitHub workspaces, per-chat file navigation and sandboxed website previews to the new local launcher.
+- Integrated Open WebUI 0.13.0 and its native chat tabs, including independent Files panels, editors and terminal views. Workbench website previews coexist with the native tabs.
 - Preserved Workbench's application profile and update feed, tested runtime pins, database backups, explicit service opt-in and workspace cleanup.
 - Adopted upstream removal of the legacy remote server picker, Spotlight and standalone voice window. Open WebUI's embedded voice features remain available.
 - Added pull-request build, runtime-contract and browser checks. Package version changes also trigger the upstream sync workflow.
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolved the Desktop upstream merge conflicts that stopped the scheduled sync before compilation in Actions run 41478912664.
 - Updated native-build ABI metadata for Electron 45, aligned the Flatpak SDK with its runtime, and made the build typecheck the actual renderer sources.
 - Retained startup failure reporting and immediate opt-in starts with the new inference runtime UI.
+- Preserved open native tabs, unsaved editors and their workspace connections when changing the composer workspace; fixed the 0.13 runtime compatibility gate that stopped the post-merge sync.
 
 Integrated official Desktop release notes are preserved in [Desktop 0.1 notes](docs/desktop-upstream-changelog.md).
 

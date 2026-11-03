@@ -4,7 +4,7 @@ let input = ''
 for await (const chunk of process.stdin) input += chunk
 const { code, map } = JSON.parse(input)
 const patched = patchWorkspaceFileNav(code, map)
-assert.ok(patched, 'Required FileNav compatibility patch is missing')
+assert.ok(patched, 'Required FileNav compatibility contract is missing')
 assert.equal(patched.length, code.length, 'Generated source-map columns must be preserved')
 assert.equal(
   patchWorkspaceFileNav(patched, map),
@@ -12,5 +12,5 @@ assert.equal(
   'Runtime compatibility must be idempotent'
 )
 console.log(
-  'Published FileNav: current-terminal cwd initialization and column-preserving patch verified'
+  'Published FileNav: terminal-scoped initialization and idempotent compatibility verified'
 )

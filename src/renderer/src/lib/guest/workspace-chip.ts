@@ -1,10 +1,13 @@
 import { applyWorkspaceToPayload } from '../../../../shared/services/chat-payload.ts'
 import { createTerminalStoreBridge } from './terminal-store-bridge.ts'
 import { createWorkspacePreviewTab } from './workspace-preview-tab.ts'
-import { resolveWorkspaceKeepIds } from '../../../../shared/services/workspace-lifecycle.ts'
+import {
+  resolveWorkspaceKeepIds,
+  nativeTabWorkspaceLeases
+} from '../../../../shared/services/workspace-lifecycle.ts'
 
 /** Inject per-chat request binding and cosmetic workspace controls into Open WebUI.
-* Missing DOM anchors must not prevent requests or break the chat. */
+ * Missing DOM anchors must not prevent requests or break the chat. */
 
 export interface GuestScriptOptions {
   /** Connector tool ids that must be active in every conversation. */
@@ -24,6 +27,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var createTerminalStoreBridge = ${createTerminalStoreBridge.toString()};
   var createWorkspacePreviewTab = ${createWorkspacePreviewTab.toString()};
   var resolveWorkspaceKeepIds = ${resolveWorkspaceKeepIds.toString()};
+  var nativeTabWorkspaceLeases = ${nativeTabWorkspaceLeases.toString()};
 
   var t = function (de, en) { return opts.german ? de : en; };
 
@@ -96,6 +100,11 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     });
     if (restore) scheduleRender();
   };
+  var nativeTabLeases = function (registered) {
+    var tabs = Array.from(document.querySelectorAll('#controls-container [data-panel-tab]'))
+      .map(function (tab) { return tab.getAttribute('data-panel-tab') || ''; });
+    return nativeTabWorkspaceLeases(tabs, registered);
+  };
   var reportLiveWorkspaces = function (extra) {
     var all = readAll();
     var ids = [];
@@ -112,6 +121,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     workspaceRequests.forEach(function (request) {
       if (ids.indexOf(request.terminalId) === -1) ids.push(request.terminalId);
     });
+    nativeTabLeases(Object.keys(readyTerminals || {})).forEach(function (id) {
+      if (ids.indexOf(id) === -1) ids.push(id);
+    });
     var revision = ++workspaceReportRevision;
     var currentKey = chatKey();
     // First reserve everything while async task inspection is in progress.
@@ -123,9 +135,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         extraId: extra && extra.terminalId,
         registeredIds: result.ids,
         requests: workspaceRequests,
-        leasedIds: workspaceRequests.filter(function (request) {
+        leasedIds: nativeTabLeases(result.ids).concat(workspaceRequests.filter(function (request) {
           return request.until > Date.now();
-        }).map(function (request) { return request.terminalId; }),
+        }).map(function (request) { return request.terminalId; })),
         hasRunningChat: async function (key) {
           var token = localStorage.getItem('token');
           if (!token) return null;
@@ -138,6 +150,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         }
       }).then(function (wanted) {
         if (revision !== workspaceReportRevision || currentKey !== chatKey()) return;
+        nativeTabLeases(result.ids).forEach(function (id) {
+          if (wanted.indexOf(id) === -1) wanted.push(id);
+        });
         var remaining = workspaceRequests.filter(function (request) { return wanted.indexOf(request.terminalId) !== -1; });
         if (remaining.length !== workspaceRequests.length) {
           workspaceRequests = remaining;
@@ -590,6 +605,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       terminalServers: terminalServersStore,
       selectedTerminalId: selectedTerminalIdStore,
       showControls: module[aliases.showControls],
+      showTabs: module[aliases.showTabs],
       showSettings: module[aliases.showSettings],
       showFileNavPath: module[aliases.showFileNavPath],
       showFileNavDir: module[aliases.showFileNavDir]
@@ -643,7 +659,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
           }
           if (sourceIndex < 0) return inspect(index + 1);
 
-          var names = ['terminalServers', 'selectedTerminalId', 'showControls', 'showFileNavPath', 'showFileNavDir', 'tools', 'showSettings'];
+          var names = ['terminalServers', 'selectedTerminalId', 'showControls', 'showTabs', 'showFileNavPath', 'showFileNavDir', 'tools', 'showSettings'];
           var aliases = {};
           for (var n = 0; n < names.length; n++) {
             var local = generatedLocalName(map, code, sourceIndex, names[n]);
