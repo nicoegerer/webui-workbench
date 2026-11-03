@@ -174,17 +174,19 @@ test('workspace release and lifecycle cleanup retire only the relevant preview',
 })
 
 test('Electron wiring enforces main-frame IPC and subframe navigation confinement', async () => {
-  const source = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
-  assert.match(source, /event\?\.sender === mainWindow\.webContents/)
+  const source = await readFile(new URL('../src/main/services/desktop.ts', import.meta.url), 'utf8')
+  assert.match(source, /request\?\.sender === mainWindow\.webContents/)
   assert.match(
     source,
     /listTerminals: \(\) => \[\.\.\.listWorkspaceTerminals\(\), \.\.\.listGithubPreviewWorkspaces\(\)\]/
   )
   assert.match(source, /getRemoteSource: getGithubPreviewSource/)
-  assert.match(source, /event\.senderFrame === mainWindow\.webContents\.mainFrame/)
+  assert.match(source, /request\.senderFrame === mainWindow\.webContents\.mainFrame/)
   assert.match(
     source,
     /on\('will-frame-navigate'[\s\S]*?!event\.isMainFrame[\s\S]*?isWorkspacePreviewNavigationAllowed[\s\S]*?event\.preventDefault\(\)/
   )
-  assert.match(source, /app\.on\('before-quit'[\s\S]*?await workspacePreview\.closeAll\(\)/)
+  const main = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
+  assert.match(main, /app\.on\('before-quit'[\s\S]*?workbench\.stop\(\)/)
+  assert.match(source, /workspacePreview\.closeAll\(\)/)
 })

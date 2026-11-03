@@ -5,6 +5,7 @@
 ## Integration boundaries
 
 - `src/main/services/` owns connector persistence, process supervision, credentials, Open WebUI registration, GitHub access and preview servers.
+- `src/main/services/desktop.ts` attaches Workbench to upstream startup, window guards and coordinated shutdown. WebUI, llama.cpp and Ollama use upstream `ManagedService` objects and the terminal dock.
 - `src/shared/services/` contains transport-independent contracts, request binding, ownership rules and repository operations.
 - `src/preload/services.ts` exposes the allow-listed renderer API. Main-process handlers validate requests independently of the UI.
 - `src/renderer/src/lib/components/Main/Settings/Services.svelte` manages connector discovery and configuration.

@@ -1,49 +1,35 @@
 import { ipcRenderer, contextBridge } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
+import { stripVTControlCharacters } from 'node:util'
+import type { ServiceId } from '../shared/terminal'
+
 import { managedServicesApi } from './services'
 import type { WorkspacePreviewInfo, WorkspacePreviewResult } from '../shared/workspace-preview'
 
-// MessagePorts cannot cross contextBridge; expose operations instead of ports.
-let activePtyPort: MessagePort | null = null
-let ptyOutputCallback: ((data: string) => void) | null = null
+import { createTerminalClient } from './terminalClient'
 
-ipcRenderer.on('pty:port', (event, _data) => {
+if (process.platform !== 'darwin') {
+  window.addEventListener(
+    'DOMContentLoaded',
+    () => {
+      const syncWindowTheme = (): void => {
+        ipcRenderer.send('window:theme', document.documentElement.classList.contains('dark'))
+      }
+      const observer = new MutationObserver(syncWindowTheme)
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+      syncWindowTheme()
+      window.addEventListener('unload', () => observer.disconnect(), { once: true })
+    },
+    { once: true }
+  )
+}
+
+const terminals = createTerminalClient((service, id) =>
+  ipcRenderer.send('terminal:connect', service, id)
+)
+window.addEventListener('unload', () => terminals.dispose())
+ipcRenderer.on('terminal:port', (event, id: number) => {
   const [port] = event.ports
-  if (!port) return
-  if (activePtyPort) activePtyPort.close()
-  activePtyPort = port
-  port.onmessage = (ev: MessageEvent) => {
-    if (ev.data?.type === 'output' && ptyOutputCallback) ptyOutputCallback(ev.data.data)
-  }
-  port.start()
-})
-
-let activeOtPtyPort: MessagePort | null = null
-let otPtyOutputCallback: ((data: string) => void) | null = null
-
-ipcRenderer.on('open-terminal:pty:port', (event, _data) => {
-  const [port] = event.ports
-  if (!port) return
-  if (activeOtPtyPort) activeOtPtyPort.close()
-  activeOtPtyPort = port
-  port.onmessage = (ev: MessageEvent) => {
-    if (ev.data?.type === 'output' && otPtyOutputCallback) otPtyOutputCallback(ev.data.data)
-  }
-  port.start()
-})
-
-let activeLsCppPtyPort: MessagePort | null = null
-let lsCppPtyOutputCallback: ((data: string) => void) | null = null
-
-ipcRenderer.on('llamacpp:pty:port', (event, _data) => {
-  const [port] = event.ports
-  if (!port) return
-  if (activeLsCppPtyPort) activeLsCppPtyPort.close()
-  activeLsCppPtyPort = port
-  port.onmessage = (ev: MessageEvent) => {
-    if (ev.data?.type === 'output' && lsCppPtyOutputCallback) lsCppPtyOutputCallback(ev.data.data)
-  }
-  port.start()
+  if (port) terminals.accept(id, port)
 })
 
 const api = {
@@ -53,6 +39,7 @@ const api = {
     return () => ipcRenderer.removeListener('main:data', handler)
   },
 
+  // App
   getAppInfo: () => ipcRenderer.invoke('app:info'),
   getVersion: () => ipcRenderer.invoke('get:version'),
   resetApp: () => ipcRenderer.invoke('app:reset'),
@@ -67,105 +54,13 @@ const api = {
   notification: (title: string, body: string) =>
     ipcRenderer.invoke('notification', { title, body }),
 
-  getConfig: () => ipcRenderer.invoke('get:config'),
-  setConfig: (config: Record<string, any>) => ipcRenderer.invoke('set:config', config),
   ...managedServicesApi,
-
-  installPython: () => ipcRenderer.invoke('install:python'),
-  getPythonStatus: () => ipcRenderer.invoke('status:python'),
-
-  installPackage: () => ipcRenderer.invoke('install:package'),
-  getPackageStatus: () => ipcRenderer.invoke('status:package'),
-
-  startServer: () => ipcRenderer.invoke('server:start'),
-  stopServer: () => ipcRenderer.invoke('server:stop'),
-  restartServer: () => ipcRenderer.invoke('server:restart'),
-  getServerInfo: () => ipcRenderer.invoke('server:info'),
-  getServerLogs: () => ipcRenderer.invoke('server:logs'),
-  clearServerLogs: () => ipcRenderer.invoke('server:logs:clear'),
-
-  listPtys: () => ipcRenderer.invoke('pty:list'),
-  connectPty: (onOutput: (data: string) => void, pid?: number) => {
-    ptyOutputCallback = onOutput
-    ipcRenderer.invoke('pty:connect', pid)
-  },
-  writePty: (data: string) => {
-    activePtyPort?.postMessage({ type: 'input', data })
-  },
-  resizePty: (cols: number, rows: number) => {
-    activePtyPort?.postMessage({ type: 'resize', cols, rows })
-  },
-  disconnectPty: () => {
-    ptyOutputCallback = null
-    if (activePtyPort) {
-      activePtyPort.close()
-      activePtyPort = null
-    }
-  },
-
   startOpenTerminal: () => ipcRenderer.invoke('open-terminal:start'),
   stopOpenTerminal: () => ipcRenderer.invoke('open-terminal:stop'),
   syncOpenTerminal: () => ipcRenderer.invoke('open-terminal:sync'),
   getOpenTerminalInfo: () => ipcRenderer.invoke('open-terminal:info'),
-  getOpenTerminalStatus: () => ipcRenderer.invoke('open-terminal:status'),
-  connectOpenTerminalPty: (onOutput: (data: string) => void) => {
-    otPtyOutputCallback = onOutput
-    ipcRenderer.invoke('open-terminal:pty:connect')
-  },
-  disconnectOpenTerminalPty: () => {
-    otPtyOutputCallback = null
-    if (activeOtPtyPort) {
-      activeOtPtyPort.close()
-      activeOtPtyPort = null
-    }
-  },
-
-  setupLlamaCpp: () => ipcRenderer.invoke('llamacpp:setup'),
-  startLlamaCpp: () => ipcRenderer.invoke('llamacpp:start'),
-  stopLlamaCpp: () => ipcRenderer.invoke('llamacpp:stop'),
-  getLlamaCppInfo: () => ipcRenderer.invoke('llamacpp:info'),
-  getLlamaCppLogs: () => ipcRenderer.invoke('llamacpp:logs'),
-  connectLlamaCppPty: (onOutput: (data: string) => void) => {
-    lsCppPtyOutputCallback = onOutput
-    ipcRenderer.invoke('llamacpp:pty:connect')
-  },
-  disconnectLlamaCppPty: () => {
-    lsCppPtyOutputCallback = null
-    if (activeLsCppPtyPort) {
-      activeLsCppPtyPort.close()
-      activeLsCppPtyPort = null
-    }
-  },
-  checkLlamaCppUpdate: () => ipcRenderer.invoke('llamacpp:check-update'),
-  updateLlamaCpp: () => ipcRenderer.invoke('llamacpp:update'),
-  uninstallLlamaCpp: () => ipcRenderer.invoke('llamacpp:uninstall'),
-
-  listHfModels: () => ipcRenderer.invoke('huggingface:models:list'),
-  getHfModelsDir: () => ipcRenderer.invoke('huggingface:models:dir'),
-  downloadHfModel: (repo: string, filename: string, token?: string, expectedSize?: number) =>
-    ipcRenderer.invoke('huggingface:models:download', repo, filename, token, expectedSize),
-  deleteHfModel: (repo: string, filename: string) =>
-    ipcRenderer.invoke('huggingface:models:delete', repo, filename),
-  cancelHfDownload: (repo?: string, filename?: string) =>
-    ipcRenderer.invoke('huggingface:models:cancel', repo, filename),
-  searchHfModels: (query: string, token?: string) =>
-    ipcRenderer.invoke('huggingface:search', query, token),
-  getHfRepoFiles: (repo: string, token?: string) =>
-    ipcRenderer.invoke('huggingface:repo:files', repo, token),
-
-  getPackageVersion: (packageName: string) => ipcRenderer.invoke('package:version', packageName),
-  uninstallPackage: (packageName: string) => ipcRenderer.invoke('package:uninstall', packageName),
-
-  getConnections: () => ipcRenderer.invoke('connections:list'),
-  addConnection: (connection: any) => ipcRenderer.invoke('connections:add', connection),
-  removeConnection: (id: string) => ipcRenderer.invoke('connections:remove', id),
-  updateConnection: (id: string, updates: any) =>
-    ipcRenderer.invoke('connections:update', id, updates),
-  setDefaultConnection: (id: string) => ipcRenderer.invoke('connections:setDefault', id),
-  connectTo: (id: string) => ipcRenderer.invoke('connections:connect', id),
-  validateUrl: (url: string) => ipcRenderer.invoke('validate:url', url),
+  setAuthToken: (token: string) => ipcRenderer.invoke('app:setAuthToken', token),
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
-
   // Guest calls return result objects instead of rejecting into the embedded chat.
   workspaceChooseFolder: () => ipcRenderer.invoke('workspace:chip:choose-folder'),
   workspaceRecent: () => ipcRenderer.invoke('workspace:chip:recent'),
@@ -206,27 +101,110 @@ const api = {
     | Extract<WorkspacePreviewResult, { ok: false }>
   > => ipcRenderer.invoke('workspace:preview:get-active'),
 
+  // Config
+  getConfig: () => ipcRenderer.invoke('get:config'),
+  setConfig: (config: Record<string, any>) => ipcRenderer.invoke('set:config', config),
+
+  // Python/uv
+  installPython: () => ipcRenderer.invoke('install:python'),
+  getPythonStatus: () => ipcRenderer.invoke('status:python'),
+
+  // Package
+  installPackage: () => ipcRenderer.invoke('install:package'),
+  getPackageStatus: () => ipcRenderer.invoke('status:package'),
+
+  // Server
+  startServer: () => ipcRenderer.invoke('server:start'),
+  stopServer: () => ipcRenderer.invoke('server:stop'),
+  restartServer: () => ipcRenderer.invoke('server:restart'),
+  getServerInfo: () => ipcRenderer.invoke('server:info'),
+  getServerLogs: () => ipcRenderer.invoke('server:logs'),
+  clearServerLogs: () => ipcRenderer.invoke('server:logs:clear'),
+
+  connectTerminal: terminals.connect,
+  disconnectTerminal: terminals.disconnect,
+  writeTerminal: terminals.write,
+  resizeTerminal: terminals.resize,
+  onTerminalLine: (service: ServiceId, callback: (line: string) => void) => {
+    let tail = ''
+    const id = terminals.connect(service, (message, consumed) => {
+      tail = message.type === 'reset' ? '' : (tail + message.data).slice(-16384)
+      // Keep split escape sequences in the buffer, but don't show an unfinished color code.
+      const plain = stripVTControlCharacters(tail.replace(/\x1b(?:\[[0-?]*[ -/]*)?$/, ''))
+      callback(
+        plain
+          .split(/[\r\n]/)
+          .findLast((line) => line.trim())
+          ?.trim() ?? ''
+      )
+      consumed()
+    })
+    return () => terminals.disconnect(id)
+  },
+
+  // Ollama
+  setupOllama: () => ipcRenderer.invoke('ollama:setup'),
+  startOllama: () => ipcRenderer.invoke('ollama:start'),
+  stopOllama: () => ipcRenderer.invoke('ollama:stop'),
+  getOllamaInfo: () => ipcRenderer.invoke('ollama:info'),
+  getOllamaLogs: () => ipcRenderer.invoke('ollama:logs'),
+  checkOllamaUpdate: () => ipcRenderer.invoke('ollama:check-update'),
+  updateOllama: () => ipcRenderer.invoke('ollama:update'),
+  uninstallOllama: () => ipcRenderer.invoke('ollama:uninstall'),
+
+  // llama.cpp
+  setupLlamaCpp: () => ipcRenderer.invoke('llamacpp:setup'),
+  startLlamaCpp: () => ipcRenderer.invoke('llamacpp:start'),
+  stopLlamaCpp: () => ipcRenderer.invoke('llamacpp:stop'),
+  getLlamaCppInfo: () => ipcRenderer.invoke('llamacpp:info'),
+  getLlamaCppAssetName: (variant?: string) => ipcRenderer.invoke('llamacpp:asset-name', variant),
+  getLlamaCppLogs: () => ipcRenderer.invoke('llamacpp:logs'),
+  checkLlamaCppUpdate: () => ipcRenderer.invoke('llamacpp:check-update'),
+  updateLlamaCpp: () => ipcRenderer.invoke('llamacpp:update'),
+  uninstallLlamaCpp: () => ipcRenderer.invoke('llamacpp:uninstall'),
+
+  // Hugging Face models
+  listHfModels: () => ipcRenderer.invoke('huggingface:models:list'),
+  getHfModelsDir: () => ipcRenderer.invoke('huggingface:models:dir'),
+  downloadHfModel: (repo: string, filename: string, token?: string, expectedSize?: number) =>
+    ipcRenderer.invoke('huggingface:models:download', repo, filename, token, expectedSize),
+  deleteHfModel: (repo: string, filename: string) =>
+    ipcRenderer.invoke('huggingface:models:delete', repo, filename),
+  cancelHfDownload: (repo?: string, filename?: string) =>
+    ipcRenderer.invoke('huggingface:models:cancel', repo, filename),
+  searchHfModels: (query: string, token?: string) =>
+    ipcRenderer.invoke('huggingface:search', query, token),
+  getHfRepoFiles: (repo: string, token?: string) =>
+    ipcRenderer.invoke('huggingface:repo:files', repo, token),
+
+  // Package
+  getPackageVersion: (packageName: string) => ipcRenderer.invoke('package:version', packageName),
+  uninstallPackage: (packageName: string) => ipcRenderer.invoke('package:uninstall', packageName),
+
+  openLocalWebUI: () => ipcRenderer.invoke('server:open'),
+
+  // Updater
+  getUpdateState: () => ipcRenderer.invoke('updater:state'),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),
 
-  getChangelog: () => ipcRenderer.invoke('app:changelog'),
-
-  setAuthToken: (token: string) => ipcRenderer.invoke('app:setAuthToken', token)
+  // Changelog
+  getChangelog: () => ipcRenderer.invoke('app:changelog')
 }
 
 export type DesktopApi = typeof api
 
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
+    contextBridge.exposeInMainWorld('electron', { process: { versions: process.versions } })
     contextBridge.exposeInMainWorld('electronAPI', api)
   } catch (error) {
     console.error(error)
   }
 } else {
   // @ts-ignore
-  window.electron = electronAPI
+  window.electron = { process: { versions: process.versions } }
   // @ts-ignore
   window.electronAPI = api
 }

@@ -27,8 +27,9 @@ test('new profiles contain no connections, workspace, credentials or enabled loc
   const literal = source.match(/const DEFAULT_CONFIG: AppConfig = (\{[\s\S]*?\n\})/)?.[1]
   assert.ok(literal)
   const config = JSON.parse(JSON.stringify(runInNewContext(`(${literal})`)))
-  assert.equal(config.defaultConnectionId, null)
-  assert.deepEqual(config.connections, [])
+  assert.equal(config.defaultConnectionId, undefined)
+  assert.equal(config.connections, undefined)
+  assert.equal(config.ollama.enabled, false)
   assert.deepEqual(config.envVars, {})
   assert.deepEqual(config.workspaces, { recent: [], active: [] })
   assert.equal(config.openTerminal.enabled, false)

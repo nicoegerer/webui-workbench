@@ -25,6 +25,14 @@ test('actual service settings preserve connector type and start optional runtime
       {
         name: 'settings-fixture',
         setup(builder) {
+          builder.onResolve({ filter: /\.svg\?raw$/ }, (args) => ({
+            path: require.resolve(args.path.slice(0, -4)),
+            namespace: 'raw-svg'
+          }))
+          builder.onLoad({ filter: /.*/, namespace: 'raw-svg' }, async ({ path }) => ({
+            contents: await readFile(path, 'utf8'),
+            loader: 'text'
+          }))
           builder.onResolve({ filter: /\/lib\/stores$|^(\.\.\/)+stores$/ }, () => ({
             path: 'stores',
             namespace: 'fixture'
@@ -36,7 +44,7 @@ test('actual service settings preserve connector type and start optional runtime
           builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: name }) => ({
             contents:
               name === 'stores'
-                ? "import { writable } from 'svelte/store'; export const config = writable({});"
+                ? "import { writable } from 'svelte/store'; export const config = writable({}); export const appInfo = writable({platform:'win32'});"
                 : "import { writable } from 'svelte/store'; export default writable({t:key=>key});",
             resolveDir: root
           }))

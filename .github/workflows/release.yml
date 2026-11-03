@@ -97,6 +97,10 @@ jobs:
                   python -B tests/test_workspace_write_guard.py --real --real-http -v
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+            - name: Prepare Electron before browser regressions
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              run: node node_modules/electron/install.js
+
             - name: Test isolated website preview in Chromium
               if: runner.os == 'Windows' && matrix.arch == 'x64'
               timeout-minutes: 10
@@ -126,7 +130,7 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: ~/.local/share/flatpak
-                  key: flatpak-sdk-23.08-electron2-${{ runner.os }}
+                  key: flatpak-sdk-25.08-electron2-${{ runner.os }}
 
             - name: Install Flatpak build tools
               id: flatpak
@@ -136,8 +140,8 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y flatpak flatpak-builder
                   flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-                  flatpak install --user -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
-                  flatpak install --user -y flathub org.electronjs.Electron2.BaseApp//23.08
+                  flatpak install --user -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+                  flatpak install --user -y flathub org.electronjs.Electron2.BaseApp//25.08
 
             # ── Apple codesigning (macOS only) ──
             - name: Install Apple codesigning certificate

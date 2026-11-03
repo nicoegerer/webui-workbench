@@ -7,7 +7,7 @@ import ts from 'typescript'
 // divergent authentication checks between listing repos and selecting a repo.
 const source = ts.createSourceFile(
   'index.ts',
-  readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/main/services/desktop.ts', import.meta.url), 'utf8'),
   ts.ScriptTarget.Latest,
   true
 )

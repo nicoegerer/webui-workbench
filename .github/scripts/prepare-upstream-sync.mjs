@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type -- Plain JavaScript CI entry point. */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -106,8 +106,12 @@ export function mergeChangelogAdditions(base, ours, theirs) {
 }
 
 function mergeOfficialUpstream(cwd, git) {
+  const desktopNotes = 'docs/desktop-upstream-changelog.md'
+  const separateNotes = existsSync(resolve(cwd, desktopNotes))
+  const forkChangelog = separateNotes ? readFileSync(resolve(cwd, 'CHANGELOG.md'), 'utf8') : null
   try {
-    git('merge', '--no-edit', 'upstream/main')
+    // Keep the merge open until fork-owned release notes have been reconciled.
+    git('merge', '--no-edit', '--no-commit', '--no-ff', 'upstream/main')
   } catch (cause) {
     const files = git('diff', '--name-only', '--diff-filter=U', '-z').split('\0').filter(Boolean)
     if (!files.length) throw cause
@@ -117,7 +121,9 @@ function mergeOfficialUpstream(cwd, git) {
       const versions = [1, 2, 3].map((stage) => git('show', `:${stage}:${file}`))
       const content =
         file === 'CHANGELOG.md'
-          ? mergeChangelogAdditions(...versions)
+          ? separateNotes
+            ? forkChangelog
+            : mergeChangelogAdditions(...versions)
           : JSON.stringify(
               mergeForkManifest(file, ...versions.map((text) => JSON.parse(text))),
               null,
@@ -127,8 +133,24 @@ function mergeOfficialUpstream(cwd, git) {
     })
     for (const [file, content] of reconciled) writeFileSync(resolve(cwd, file), content)
     git('add', '--', ...files)
-    git('commit', '--no-edit')
   }
+  try {
+    git('rev-parse', '--quiet', '--verify', 'MERGE_HEAD')
+  } catch {
+    return // Already integrated; do not create another release for unchanged upstream.
+  }
+  if (separateNotes) {
+    const commit = git('rev-parse', 'upstream/main')
+    writeFileSync(resolve(cwd, 'CHANGELOG.md'), forkChangelog)
+    writeFileSync(
+      resolve(cwd, desktopNotes),
+      `# Official Desktop changelog\n\n[Release policy](upstream-and-releases.md) · [Original changelog](https://github.com/open-webui/desktop/blob/${commit}/CHANGELOG.md)\n\nDesktop versions and Workbench versions are independent. This snapshot records the integrated official Desktop history.\n\n` +
+        git('show', 'upstream/main:CHANGELOG.md') +
+        '\n'
+    )
+    git('add', '--', 'CHANGELOG.md', desktopNotes)
+  }
+  git('commit', '--no-edit')
 }
 
 /** Prepare only. CI tests the candidate before atomically pushing any branch. */
@@ -186,7 +208,9 @@ export function prepareSync(cwd, backendTag) {
     )
   }
   git('add', 'package.json', 'package-lock.json', 'CHANGELOG.md', runtimePath)
-  git('commit', '-m', `chore: release v${version}`)
+  if (git('diff', '--cached', '--name-only')) {
+    git('commit', '-m', `chore: release v${version}`)
+  }
   return { changed: true, version, backend: runtime.openWebUI }
 }
 

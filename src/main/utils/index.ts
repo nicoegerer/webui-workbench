@@ -5,12 +5,18 @@ import * as os from 'os'
 import * as path from 'path'
 import net from 'net'
 import crypto from 'crypto'
+import { Readable, Transform } from 'stream'
+import { pipeline } from 'stream/promises'
 
 import * as tar from 'tar'
 
-import { app, shell, Notification, net as electronNet, session } from 'electron'
+import { app, shell, session, Notification, net as electronNet } from 'electron'
+import { execFileSync, spawn, execFile } from 'child_process'
+import runtimeVersions from '../../shared/runtime-versions.json'
+import { runtimeUpgradeVersion } from '../../shared/services/runtime-update'
 import { prepareWorkspaceFrontend } from '../services/workspace-frontend'
-import { execFileSync, exec, spawn, execSync, execFile } from 'child_process'
+import { ManagedService, waitForReady } from '../process/managedService'
+import { spawnPty } from '../process/nativePty'
 
 import log from 'electron-log'
 log.transports.file.resolvePathFn = () => getLogFilePath('main')
@@ -18,6 +24,7 @@ log.transports.file.resolvePathFn = () => getLogFilePath('main')
 const serverLogger = log.create({ logId: 'server' })
 serverLogger.transports.file.resolvePath = () => getLogFilePath('server')
 
+// ─── Paths ──────────────────────────────────────────────
 
 export const getLogFilePath = (name: string = 'main'): string => {
   const logDir = path.join(getUserDataPath(), 'logs')
@@ -51,7 +58,11 @@ export const getUserDataPath = (): string => {
   return path.normalize(userDataDir)
 }
 
-/** Resolve the heavyweight data directory synchronously, before async startup. */
+/**
+ * Root directory for heavyweight data (Python, models, llama.cpp).
+ * Reads `installDir` from config.json synchronously so it's available
+ * before any async init. Falls back to `getUserDataPath()`.
+ */
 export const getInstallDir = (): string => {
   const configPath = path.join(getUserDataPath(), 'config.json')
   let customDir = ''
@@ -73,6 +84,7 @@ export const getInstallDir = (): string => {
 }
 
 export const getOpenWebUIDataPath = (): string => {
+  // Check config for custom data directory
   const configPath = path.join(getUserDataPath(), 'config.json')
   let customDir = ''
   try {
@@ -93,8 +105,10 @@ export const getOpenWebUIDataPath = (): string => {
 }
 
 export const openUrl = (url: string) => {
-  if (!url) {
-    throw new Error('No URL provided to open in browser.')
+  try {
+    if (typeof url !== 'string' || !['http:', 'https:', 'mailto:'].includes(new URL(url).protocol)) return
+  } catch {
+    return
   }
   log.info('Opening URL in browser:', url)
   if (url.startsWith('http://0.0.0.0')) {
@@ -120,27 +134,43 @@ export const getSecretKey = (keyPath?: string, key?: string): string => {
   return key
 }
 
+// ─── Port Utils ─────────────────────────────────────────
 
-export const portInUse = async (port: number, host: string = '0.0.0.0'): Promise<boolean> => {
-  return new Promise((resolve) => {
-    const client = new net.Socket()
-    client
-      .setTimeout(1000)
-      .once('connect', () => {
-        client.destroy()
-        resolve(true)
+export const portInUse = async (port: number, host: string): Promise<boolean> => {
+  return new Promise((resolve, reject) => {
+    // Probe the bind address; connecting to 0.0.0.0 fails on Windows even for occupied ports.
+    const server = net.createServer((socket) => socket.destroy())
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EADDRINUSE' || error.code === 'EACCES') resolve(true)
+      else reject(error)
+    })
+    server.listen({ port, host, exclusive: true }, () => {
+      server.close((error) => {
+        if (error) reject(error)
+        else resolve(false)
       })
-      .once('timeout', () => {
-        client.destroy()
-        resolve(false)
-      })
-      .once('error', () => {
-        resolve(false)
-      })
-      .connect(port, host)
+    })
   })
 }
 
+export const findAvailablePort = async (
+  preferred: number,
+  host: string,
+  signal: AbortSignal
+): Promise<number> => {
+  if (!Number.isInteger(preferred) || preferred < 1 || preferred > 65535) {
+    throw new RangeError('Server port must be an integer between 1 and 65535')
+  }
+  for (let port = preferred; port <= Math.min(preferred + 100, 65535); port++) {
+    signal.throwIfAborted()
+    const occupied = await portInUse(port, host)
+    signal.throwIfAborted()
+    if (!occupied) return port
+  }
+  throw new Error('No available ports found')
+}
+
+// ─── Python Download & Install ──────────────────────────
 
 const getPlatformString = () => {
   const platformMap = {
@@ -170,36 +200,52 @@ const generateDownloadUrl = () => {
   return `${baseUrl}/${releaseDate}/${filename}`
 }
 
-export const downloadFileWithProgress = async (url, downloadPath, onProgress) => {
+export const verifyFileChecksum = async (filename: string, sha256: string): Promise<void> => {
+  if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(sha256)) {
+    throw new Error('Missing or invalid SHA-256 checksum')
+  }
+  const hash = crypto.createHash('sha256')
+  for await (const chunk of fs.createReadStream(filename)) hash.update(chunk)
+  if (hash.digest('hex') !== sha256.toLowerCase()) throw new Error('Download checksum mismatch')
+}
+
+export const downloadFileWithProgress = async (
+  url, downloadPath, onProgress, signal: AbortSignal | undefined, sha256: string,
+  headers?: Record<string, string>
+) => {
+  if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(sha256)) {
+    throw new Error('Missing or invalid SHA-256 checksum')
+  }
+  const temporaryPath = `${downloadPath}.${crypto.randomUUID()}.tmp`
   try {
-    const response = await fetch(url)
-    if (!response || !response.ok) {
+    const response = await fetch(url, { signal, headers })
+    if (!response?.ok || !response.body) {
       throw new Error(`HTTP error! status: ${response?.status}`)
     }
     const totalSize = parseInt(response.headers.get('content-length'), 10)
     let downloadedSize = 0
-    const reader = response.body.getReader()
-    const chunks = []
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(value)
-      downloadedSize += value.length
-      if (onProgress && totalSize) {
-        onProgress((downloadedSize / totalSize) * 100, downloadedSize, totalSize)
+    const hash = crypto.createHash('sha256')
+    const progress = new Transform({
+      transform(chunk, _encoding, callback) {
+        hash.update(chunk)
+        downloadedSize += chunk.length
+        try {
+          onProgress?.(totalSize ? downloadedSize / totalSize * 100 : 0, downloadedSize, totalSize || 0)
+          callback(null, chunk)
+        } catch (error) {
+          callback(error)
+        }
       }
-    }
-
-    const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
-    fs.writeFileSync(downloadPath, buffer)
+    })
+    await pipeline(Readable.fromWeb(response.body), progress, fs.createWriteStream(temporaryPath, { flags: 'wx' }), { signal })
+    if (hash.digest('hex') !== sha256.toLowerCase()) throw new Error('Download checksum mismatch')
+    signal?.throwIfAborted()
+    fs.renameSync(temporaryPath, downloadPath)
     log.info('File downloaded successfully:', downloadPath)
     return downloadPath
   } catch (error) {
     try {
-      if (fs.existsSync(downloadPath)) {
-        fs.unlinkSync(downloadPath)
-      }
+      fs.rmSync(temporaryPath, { force: true })
     } catch {}
     log.error('Download failed:', error)
     throw error
@@ -222,21 +268,35 @@ export const getPythonInstallationDir = (): string => {
   return path.normalize(pythonDir)
 }
 
-const downloadPython = async (onProgress = null) => {
+const pythonChecksums: Record<string, string> = {
+  'aarch64-apple-darwin': '58038f6643b0c51385aa8af1549d2f6d9598c7a48383b9c74fc65481b2b5e6d5',
+  'aarch64-pc-windows-msvc': '23a9d18ad7d62e8470f6dfbf3e3ddc8c6a343ec8a07bad0197689f96f024a98f',
+  'aarch64-unknown-linux-gnu': '872bb2d9959bbcba411af08fa57423d586b779c21c7de70890f99e1c59036efc',
+  'x86_64-apple-darwin': '09d7bfb7e2684d746e2d44bd800becfd07c4c672de907340d279409a8bca2d8b',
+  'x86_64-pc-windows-msvc': 'b9f9d17a11944c13a3a2798c8b48ec861b2f10710dc345094f567beed4271427',
+  'x86_64-unknown-linux-gnu': 'eddc8bf40c7fca5032acd5de4b89e748e17b16cf61918320a0506c7e450a8df3'
+}
+
+const downloadPython = async (onProgress = null, signal?: AbortSignal) => {
   const url = generateDownloadUrl()
   const downloadPath = getPythonDownloadPath()
+  const checksum = pythonChecksums[`${getArchString()}-${getPlatformString()}`]
 
   log.info(`Detected system: ${os.platform()} ${os.arch()}`)
   log.info(`Download path: ${downloadPath}`)
   log.info(`URL: ${url}`)
 
   if (fs.existsSync(downloadPath)) {
-    log.info(`File already exists: ${downloadPath}`)
-    return downloadPath
+    try {
+      await verifyFileChecksum(downloadPath, checksum)
+      return downloadPath
+    } catch {
+      fs.unlinkSync(downloadPath)
+    }
   }
 
   try {
-    const result = await downloadFileWithProgress(url, downloadPath, onProgress)
+    const result = await downloadFileWithProgress(url, downloadPath, onProgress, signal, checksum)
     log.info(`Python downloaded successfully to: ${result}`)
     return result
   } catch (error) {
@@ -254,10 +314,7 @@ const checkInternet = async () => {
   }
 }
 
-export const installPython = async (
-  installationDir?: string,
-  onStatus?: (status: string) => void
-): Promise<boolean> => {
+export const installPython = async (installationDir?: string, onStatus?: (status: string) => void, signal?: AbortSignal): Promise<boolean> => {
   const pythonDownloadPath = getPythonDownloadPath()
   if (!fs.existsSync(pythonDownloadPath)) {
     if (!(await checkInternet())) {
@@ -265,17 +322,17 @@ export const installPython = async (
         'An active internet connection is required. Please connect to the internet and try again.'
       )
     }
-    let lastReportedPct = -1
-    await downloadPython((progress, downloaded, total) => {
-      const pct = Math.floor(progress)
-      if (pct === lastReportedPct) return
-      lastReportedPct = pct
-      const mb = (downloaded / 1024 / 1024).toFixed(1)
-      const totalMb = (total / 1024 / 1024).toFixed(1)
-      log.info(`Downloading Python: ${pct}% (${mb}/${totalMb} MB)`)
-      onStatus?.(`Downloading Python… ${pct}% (${mb}/${totalMb} MB)`)
-    })
   }
+  let lastReportedPct = -1
+  await downloadPython((progress, downloaded, total) => {
+    const pct = Math.floor(progress)
+    if (pct === lastReportedPct) return
+    lastReportedPct = pct
+    const mb = (downloaded / 1024 / 1024).toFixed(1)
+    const totalMb = (total / 1024 / 1024).toFixed(1)
+    log.info(`Downloading Python: ${pct}% (${mb}/${totalMb} MB)`)
+    onStatus?.(`Downloading Python… ${pct}% (${mb}/${totalMb} MB)`)
+  }, signal)
   if (!fs.existsSync(pythonDownloadPath)) {
     log.error('Python download not found')
     return false
@@ -285,16 +342,17 @@ export const installPython = async (
   log.info(installationDir, pythonDownloadPath)
 
   try {
+    signal?.throwIfAborted()
     onStatus?.('Extracting Python…')
     const installBase = getInstallDir()
     await tar.x({ cwd: installBase, file: pythonDownloadPath })
   } catch (error) {
     log.error(error)
     // Remove possibly-corrupted download so next retry re-downloads
-    try {
-      fs.unlinkSync(pythonDownloadPath)
-    } catch {}
-    throw new Error('Failed to extract Python. The download may be corrupted. Please try again.')
+    try { fs.unlinkSync(pythonDownloadPath) } catch {}
+    throw new Error(
+      'Failed to extract Python. The download may be corrupted. Please try again.'
+    )
   }
 
   if (!isPythonInstalled(installationDir)) {
@@ -342,19 +400,41 @@ export const getPythonPath = (installationDir?: string) => {
   return path.normalize(getPythonExecutablePath(installationDir || getPythonInstallationDir()))
 }
 
-/** Put bundled Python first on Windows PATH so its matching OpenSSL DLLs win over system installations. */
+/**
+ * Build a process environment suitable for running the bundled Python.
+ *
+ * On Windows the standalone Python distribution ships its own OpenSSL DLLs
+ * (`libssl-3-x64.dll`, `libcrypto-3-x64.dll`) next to `python.exe`.  If a
+ * different OpenSSL installation (Git for Windows, Anaconda, Strawberry Perl,
+ * etc.) appears earlier on the system `PATH`, Python picks up those mismatched
+ * DLLs at load-time, which causes the fatal error:
+ *
+ *     OPENSSL_Uplink(..., 08): no OPENSSL_Applink
+ *
+ * To prevent this we prepend the Python installation directory to `PATH` so
+ * Windows finds the correct DLLs first.  On non-Windows platforms this is a
+ * harmless no-op.
+ *
+ * Any additional env overrides (e.g. `configEnvVars`) can be spread after
+ * calling this helper.
+ */
+export const getProcessEnv = (extra: Record<string, string> = {}): Record<string, string> =>
+  Object.fromEntries(Object.entries({ ...process.env, ...extra }).filter(([key, value]) =>
+    value !== undefined && !/^(LD_PRELOAD|LD_AUDIT|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|DYLD_FRAMEWORK_PATH|DYLD_FORCE_FLAT_NAMESPACE|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|ELECTRON_NO_ASAR|PYTHONINSPECT|PYTHONSTARTUP|PYTHONHOME)$/i.test(key)
+  ))
+
 const pythonEnv = (extra: Record<string, string> = {}): Record<string, string> => {
-  const base: Record<string, string> = { ...process.env }
+  const base = getProcessEnv(extra)
 
   if (process.platform === 'win32') {
     // python.exe lives at the root of the installation directory on Windows
     const pythonDir = getPythonInstallationDir()
-    const currentPath = process.env['PATH'] || process.env['Path'] || ''
+    const currentPath = base['PATH'] || base['Path'] || ''
     base['PATH'] = `${pythonDir};${currentPath}`
     base['PYTHONIOENCODING'] = 'utf-8'
   }
 
-  return { ...base, ...extra }
+  return base
 }
 
 export const isPythonInstalled = (installationDir?: string) => {
@@ -411,30 +491,70 @@ export const uninstallPython = (installationDir?: string): boolean => {
   return true
 }
 
+// ─── Package Management ─────────────────────────────────
 
-export const installPackage = (
-  packageName: string,
-  version?: string,
-  onStatus?: (status: string) => void
-): Promise<boolean> => {
-  return new Promise((resolve, reject) => {
+export const backupOpenWebUIDatabase = async (): Promise<string | null> => {
+  const source = path.join(getOpenWebUIDataPath(), 'webui.db')
+  if (!fs.existsSync(source)) return null
+  const backupDir = path.join(getOpenWebUIDataPath(), 'backups')
+  fs.mkdirSync(backupDir, { recursive: true })
+  const target = path.join(backupDir, `webui-before-update-${Date.now()}.db`)
+  const code = [
+    'import sqlite3, sys',
+    'from pathlib import Path',
+    'source = sqlite3.connect(Path(sys.argv[1]).as_uri() + "?mode=ro", uri=True)',
+    'target = sqlite3.connect(sys.argv[2])',
+    'try:',
+    '    source.backup(target)',
+    'finally:',
+    '    target.close()',
+    '    source.close()'
+  ].join('\n')
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      getPythonPath(),
+      ['-c', code, source, target],
+      {
+        env: pythonEnv(),
+        windowsHide: true,
+        timeout: 60_000
+      },
+      (error) => (error ? reject(error) : resolve())
+    )
+  })
+  log.info('Open WebUI database backup created:', target)
+  return target
+}
+
+
+let packageInstall: Promise<boolean> | undefined
+const getIncompleteInstallPath = () => path.join(getPythonInstallationDir(), '.install-incomplete')
+
+export const installPackage = (packageName: string, version?: string, onStatus?: (status: string) => void, signal?: AbortSignal): Promise<boolean> => {
+  if (packageInstall) return Promise.reject(new Error('A package installation is already in progress'))
+  if (webuiService.info.pid !== null) return Promise.reject(new Error('Stop Open WebUI before updating packages'))
+  const marker = getIncompleteInstallPath()
+  const repair = fs.existsSync(marker)
+  packageInstall = new Promise<boolean>((resolve, reject) => {
+    signal?.throwIfAborted()
     if (!isPythonInstalled()) {
-      return reject(
-        new Error('Python is not installed. Please reinstall the app or run setup again.')
-      )
+      return reject(new Error('Python is not installed. Please reinstall the app or run setup again.'))
     }
+    // uv can remove packages before failing; retain this across crashes until a repair succeeds.
+    fs.writeFileSync(marker, '')
     const pythonPath = getPythonPath()
-    const commandProcess = execFile(
+    const commandProcess = spawn(
       pythonPath,
       [
         '-m',
         'uv',
         'pip',
         'install',
+        ...(repair ? ['--reinstall'] : []),
         ...(version ? [`${packageName}==${version}`] : [packageName, '-U'])
       ],
       {
-        env: pythonEnv()
+        env: pythonEnv(), signal, windowsHide: true
       }
     )
 
@@ -455,27 +575,39 @@ export const installPackage = (
         onStatus?.(line)
       }
     })
-    commandProcess.on('exit', (code) => {
+    commandProcess.on('close', (code) => {
       log.info(`Package install exited with code ${code}`)
-      if (code === 0) {
+      if (signal?.aborted) {
+        reject(signal.reason)
+      } else if (code === 0) {
         resolve(true)
       } else {
-        reject(
-          new Error(
-            lastLine ||
-              `Package installation failed (exit code ${code}). Please check your internet connection and try again.`
-          )
-        )
+        reject(new Error(
+          lastLine || `Package installation failed (exit code ${code}). Please check your internet connection and try again.`
+        ))
       }
     })
     commandProcess.on('error', (error) => {
       log.error(`Package install error: ${error.message}`)
-      reject(new Error(`Failed to run package installer: ${error.message}`))
+      lastLine = `Failed to run package installer: ${error.message}`
     })
-  })
+  }).then(() => {
+    signal?.throwIfAborted()
+    if (packageName === 'open-webui') {
+      execFileSync(getPythonPath(), ['-c', 'import open_webui, pydantic_core, uvicorn._subprocess'], {
+        env: pythonEnv(), timeout: 30000, windowsHide: true
+      })
+    }
+    fs.unlinkSync(marker)
+    return true
+  }).finally(() => { packageInstall = undefined })
+  return packageInstall
 }
 
-export const installPackages = async (packages: string[], version?: string): Promise<boolean> => {
+export const installPackages = async (
+  packages: string[],
+  version?: string
+): Promise<boolean> => {
   for (const pkg of packages) {
     const ok = await installPackage(pkg, version)
     if (!ok) return false
@@ -512,41 +644,8 @@ export const getPackageVersion = (packageName: string): string | null => {
   }
 }
 
-/** Consistent SQLite backup, including WAL, before a backend schema migration. */
-export const backupOpenWebUIDatabase = async (): Promise<string | null> => {
-  const source = path.join(getOpenWebUIDataPath(), 'webui.db')
-  if (!fs.existsSync(source)) return null
-  const backupDir = path.join(getOpenWebUIDataPath(), 'backups')
-  fs.mkdirSync(backupDir, { recursive: true })
-  const target = path.join(backupDir, `webui-before-update-${Date.now()}.db`)
-  const code = [
-    'import sqlite3, sys',
-    'from pathlib import Path',
-    'source = sqlite3.connect(Path(sys.argv[1]).as_uri() + "?mode=ro", uri=True)',
-    'target = sqlite3.connect(sys.argv[2])',
-    'try:',
-    '    source.backup(target)',
-    'finally:',
-    '    target.close()',
-    '    source.close()'
-  ].join('\n')
-  await new Promise<void>((resolve, reject) => {
-    execFile(
-      getPythonPath(),
-      ['-c', code, source, target],
-      {
-        env: pythonEnv(),
-        windowsHide: true,
-        timeout: 60_000
-      },
-      (error) => (error ? reject(error) : resolve())
-    )
-  })
-  log.info('Open WebUI database backup created:', target)
-  return target
-}
-
 export const uninstallPackage = (packageName: string): boolean => {
+  if (packageInstall || webuiService.info.pid !== null) return false
   const pythonPath = getPythonPath()
   if (!fs.existsSync(pythonPath)) return false
   try {
@@ -562,27 +661,39 @@ export const uninstallPackage = (packageName: string): boolean => {
   }
 }
 
+// ─── Server Management ──────────────────────────────────
 
-import * as pty from 'node-pty'
+export const webuiService = new ManagedService(spawnPty, true)
+webuiService.subscribe((event) => {
+  if (event.type === 'output') serverLogger.info(event.data.trimEnd())
+})
 
-const serverPIDs: Set<number> = new Set()
-const serverLogs: Map<number, string[]> = new Map()
-let serverPtyProcesses: Map<number, pty.IPty> = new Map()
-
-export const getServerPIDs = (): number[] => Array.from(serverPIDs)
-export const getServerPty = (pid: number): pty.IPty | undefined => serverPtyProcesses.get(pid)
-
-export const startServer = async (
-  expose = false,
-  port = null
-): Promise<{ url: string; pid: number }> => {
-  await stopAllServers()
+export const startServer = (onStatus?: (status: string) => void) => webuiService.start(async (signal) => {
+  await packageInstall
+  signal.throwIfAborted()
   const config = await getConfig()
   const configEnvVars = config.envVars ?? {}
+  const expose = config.localServer?.serveOnLocalNetwork ?? false
+  const port = config.localServer?.port
   const host = expose ? '0.0.0.0' : '127.0.0.1'
   if (!isPythonInstalled()) throw new Error('Python is not installed')
   if (!isPackageInstalled('open-webui')) throw new Error('open-webui package is not installed')
 
+  if (!isPackageInstalled('open-terminal')) {
+    await installPackage('open-terminal', config.openTerminal?.version || runtimeVersions.openTerminal, onStatus, signal)
+  }
+  const upgrade = runtimeUpgradeVersion(getPackageVersion('open-webui'), runtimeVersions.openWebUI, config.localServer)
+  if (upgrade) {
+    try {
+      onStatus?.('Updating Open WebUI…')
+      await backupOpenWebUIDatabase()
+      await installPackage('open-webui', upgrade, onStatus, signal)
+    } finally { onStatus?.('') }
+  }
+  signal.throwIfAborted()
+  if (fs.existsSync(getIncompleteInstallPath())) {
+    throw new Error('A package installation was interrupted. Update or install Open WebUI in Settings to repair it.')
+  }
   const pythonPath = getPythonPath()
   log.info(`Using Python at: ${pythonPath}`)
 
@@ -608,280 +719,62 @@ export const startServer = async (
     fs.mkdirSync(dataDir, { recursive: true })
   }
 
-  let desiredPort = port || 8080
-  let availablePort = desiredPort
-  while (await portInUse(availablePort, host)) {
-    availablePort++
-    if (availablePort > desiredPort + 100) {
-      throw new Error('No available ports found')
-    }
-  }
+  const availablePort = await findAvailablePort(port || 8080, host, signal)
   commandArgs.push('--port', availablePort.toString())
   log.info('Starting Open-WebUI server...', pythonPath, commandArgs.join(' '))
 
-  let ptyProcess: pty.IPty
-  try {
-    ptyProcess = pty.spawn(pythonPath, commandArgs, {
-      name: 'xterm-256color',
-      cols: 200,
-      rows: 50,
-      env: pythonEnv({
-        ...(configEnvVars ?? {}),
-        DATA_DIR: dataDir,
-        WEBUI_SECRET_KEY: secretKey,
-        PYTHONUNBUFFERED: '1'
-      })
-    })
-  } catch (error) {
-    throw new Error(`Failed to spawn PTY with ${pythonPath}: ${error?.message ?? error}`)
-  }
-
-  const pid = ptyProcess.pid
-  const rawBuffer: string[] = []
-  serverPIDs.add(pid)
-  serverLogs.set(pid, rawBuffer)
-  serverPtyProcesses.set(pid, ptyProcess)
-
-  ptyProcess.onData((data: string) => {
-    rawBuffer.push(data)
-    serverLogger.info(`[PID:${pid}] ${data.replace(/[\r\n]+/g, ' ').trim()}`)
-  })
-
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    const exitMsg = `\r\n[Process exited with code ${exitCode}${signal ? ` signal ${signal}` : ''}]\r\n`
-    rawBuffer.push(exitMsg)
-    serverLogger.info(`[PID:${pid}] Exited code=${exitCode} signal=${signal}`)
-    serverPIDs.delete(pid)
-    serverPtyProcesses.delete(pid)
-  })
-
-  let effectiveHost = host
-  if (!expose && host === '0.0.0.0') effectiveHost = '127.0.0.1'
-  const url = `http://${effectiveHost}:${availablePort}`
-  log.info(`Server started with PID: ${pid}, URL: ${url}`)
-
-  return { url, pid }
-}
-
-export async function stopAllServers(): Promise<void> {
-  log.info('Stopping all servers...')
-  const pidsToStop = Array.from(serverPIDs)
-  if (pidsToStop.length === 0) return
-
-  // Kill PTY processes directly — cleaner than process tree termination
-  for (const pid of pidsToStop) {
-    const ptyProc = serverPtyProcesses.get(pid)
-    if (ptyProc) {
-      try {
-        ptyProc.kill()
-      } catch (e) {
-        log.warn(`Failed to kill PTY process ${pid}:`, e)
-      }
-    } else {
-      await terminateProcessTree(pid, false)
-    }
-  }
-
-  await sleep(2000)
-
-  for (const pid of pidsToStop) {
-    if (isProcessRunning(pid)) {
-      await terminateProcessTree(pid, true)
-    }
-  }
-
-  for (const pid of pidsToStop) {
-    if (!isProcessRunning(pid)) {
-      serverPIDs.delete(pid)
-      serverLogs.delete(pid)
-      serverPtyProcesses.delete(pid)
-    } else {
-      log.warn(`Process ${pid} may still be running after termination attempts`)
-    }
-  }
-}
-
-export const clearServerLog = (pid: number): void => {
-  const logs = serverLogs.get(pid)
-  if (logs) logs.length = 0
-}
-
-export const clearAllServerLogs = (): void => {
-  for (const logs of serverLogs.values()) {
-    logs.length = 0
-  }
-}
-
-async function terminateProcessTree(pid: number, forceKill: boolean = false): Promise<void> {
-  const maxRetries = 3
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      if (process.platform === 'win32') {
-        await terminateWindows(pid, forceKill)
-      } else {
-        await terminateUnix(pid, forceKill)
-      }
-      if (!isProcessRunning(pid)) {
-        log.info(`Successfully terminated process tree (PID: ${pid})`)
-        return
-      }
-    } catch (error) {
-      log.warn(`Attempt ${attempt}/${maxRetries} failed for PID ${pid}:`, error)
-    }
-    if (attempt < maxRetries) await sleep(1000)
-  }
-  log.error(`Failed to terminate process tree (PID: ${pid}) after ${maxRetries} attempts`)
-}
-
-async function terminateWindows(pid: number, forceKill: boolean): Promise<void> {
-  const commands = forceKill
-    ? [`taskkill /PID ${pid} /T /F`]
-    : [`taskkill /PID ${pid} /T`, `taskkill /PID ${pid} /T /F`]
-  for (const cmd of commands) {
-    try {
-      execSync(cmd, { timeout: 5000, stdio: 'ignore' })
-      await sleep(500)
-    } catch {}
-  }
-}
-
-async function terminateUnix(pid: number, forceKill: boolean): Promise<void> {
-  const signals = forceKill ? ['SIGKILL'] : ['SIGTERM', 'SIGKILL']
-  for (const signal of signals) {
-    try {
-      process.kill(-pid, signal)
-      await sleep(500)
-      if (isProcessRunning(pid)) {
-        process.kill(pid, signal)
-        await sleep(500)
-      }
-    } catch {}
-  }
-}
-
-function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-export function getServerLog(pid: number): string[] {
-  return serverLogs.get(pid) || []
-}
-
-
-export const checkUrlAndOpen = async (url: string, callback: Function = async () => {}) => {
-  const maxAttempts = 1800
-  const interval = 2000
-  let attempts = 0
-
-  const checkUrl = async (): Promise<boolean> => {
-    try {
-      const response = await electronNet.fetch(url, { method: 'HEAD' })
+  const url = `http://127.0.0.1:${availablePort}`
+  return {
+    file: pythonPath, args: commandArgs, url,
+    env: pythonEnv({ ...configEnvVars, DATA_DIR: dataDir, WEBUI_SECRET_KEY: secretKey, PYTHONUNBUFFERED: '1' }),
+    ready: (signal) => waitForReady(async (probeSignal) => {
+      const response = await electronNet.fetch(url, { method: 'HEAD', signal: probeSignal })
       return response.ok
-    } catch {
-      return false
-    }
+    }, signal)
   }
-
-  const pollUrl = async () => {
-    while (attempts < maxAttempts) {
-      attempts++
-      const isAvailable = await checkUrl()
-      if (isAvailable) {
-        log.info('URL is now available')
-        await callback()
-        return
-      }
-      await new Promise((resolve) => setTimeout(resolve, interval))
-    }
-    log.info('URL check timed out')
-  }
-
-  pollUrl().catch((error) => {
-    log.error('Error in URL polling:', error)
-  })
-}
-
-export const validateRemoteUrl = async (url: string): Promise<boolean> => {
-  try {
-    const response = await electronNet.fetch(url, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(5000)
-    })
-    return response.ok
-  } catch {
-    return false
-  }
-}
-
-
-export interface Connection {
-  id: string
-  name: string
-  type: 'local' | 'remote'
-  url: string
-}
+})
 
 export interface AppConfig {
   version: number
-  defaultConnectionId: string | null
-  connections: Connection[]
+  automaticUpdates: boolean
   runInBackground: boolean
+  startMinimized: boolean
+  showMenuBarIcon: boolean
   globalShortcut: string
-  spotlightShortcut: string
   installDir: string
   dataDir: string
+  theme?: string
+  openTerminal: { enabled: boolean; port: number; cwd: string; version?: string; apiKey?: string; apiKeyEncrypted?: string }
+  workspaces: { recent: Array<{ path: string; name: string; lastUsedAt: number }>; active: string[] }
   localServer: {
+    version?: string
     port: number
     serveOnLocalNetwork: boolean
     autoUpdate: boolean
-  }
-  openTerminal: {
-    enabled: boolean
-    port: number
-    cwd: string
-    apiKey?: string
-    apiKeyEncrypted?: string
   }
   llamaCpp: {
     enabled: boolean
     port: number
     version: string
     variant: string
+    assetName?: string
     extraArgs: string[]
   }
-  workspaces: {
-    recent: Array<{ path: string; name: string; lastUsedAt: number }>
-    /** Persisted local workspace selections; terminals start on conversation activation. */
-    active: string[]
-  }
+  ollama: { enabled: boolean; port: number; version: string }
   envVars: Record<string, string>
-  showSidebar: boolean
-  spotlightPosition: { x: number; y: number } | null
-  spotlightClipboardPaste: boolean
-  voiceInputShortcut: string
-  voiceInputEnabled: boolean
-  callShortcut: string
-  callEnabled: boolean
   windowBounds: { x: number; y: number; width: number; height: number } | null
   windowMaximized: boolean
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   version: 1,
-  defaultConnectionId: null,
-  connections: [],
+  automaticUpdates: true,
+  openTerminal: { enabled: false, port: 39284, cwd: '' },
+  workspaces: { recent: [], active: [] },
   runInBackground: true,
-  globalShortcut: 'Alt+CommandOrControl+O',
-  spotlightShortcut: 'Shift+CommandOrControl+I',
+  startMinimized: false,
+  showMenuBarIcon: true,
+  globalShortcut: 'CommandOrControl+Shift+O',
   installDir: '',
   dataDir: '',
   localServer: {
@@ -889,29 +782,14 @@ const DEFAULT_CONFIG: AppConfig = {
     serveOnLocalNetwork: false,
     autoUpdate: true
   },
-  openTerminal: {
-    enabled: false,
-    port: 39284,
-    cwd: ''
-  },
   llamaCpp: {
     enabled: false,
     version: 'latest',
     variant: 'cpu',
     extraArgs: []
   },
-  workspaces: {
-    recent: [],
-    active: []
-  },
+  ollama: { enabled: false, port: 11434, version: 'latest' },
   envVars: {},
-  showSidebar: false,
-  spotlightPosition: null,
-  spotlightClipboardPaste: true,
-  voiceInputShortcut: 'Shift+CommandOrControl+Space',
-  voiceInputEnabled: true,
-  callShortcut: 'Shift+CommandOrControl+C',
-  callEnabled: true,
   windowBounds: null,
   windowMaximized: false
 }
@@ -922,14 +800,13 @@ export const getConfig = async (): Promise<AppConfig> => {
     if (fs.existsSync(configPath)) {
       const data = await fs.promises.readFile(configPath, 'utf8')
       const saved = JSON.parse(data) as Partial<AppConfig>
-      const savedWorkspaces = saved.workspaces
       return {
-        ...DEFAULT_CONFIG,
-        ...saved,
-        // Persist only local recent/active state; cloud workspace selection belongs to the chat.
+        ...structuredClone(DEFAULT_CONFIG), ...saved,
+        localServer: { ...DEFAULT_CONFIG.localServer, ...saved.localServer },
+        openTerminal: { ...DEFAULT_CONFIG.openTerminal, ...saved.openTerminal },
         workspaces: {
-          recent: Array.isArray(savedWorkspaces?.recent) ? savedWorkspaces.recent : [],
-          active: Array.isArray(savedWorkspaces?.active) ? savedWorkspaces.active : []
+          recent: Array.isArray(saved.workspaces?.recent) ? saved.workspaces.recent : [],
+          active: Array.isArray(saved.workspaces?.active) ? saved.workspaces.active : []
         }
       }
     }
@@ -946,9 +823,7 @@ export const setConfig = async (config: Partial<AppConfig>): Promise<void> => {
   // Serialize writes so concurrent callers don't race on the tmp file
   const previous = configWriteLock
   let resolve: () => void
-  configWriteLock = new Promise<void>((r) => {
-    resolve = r
-  })
+  configWriteLock = new Promise<void>((r) => { resolve = r })
   await previous
 
   const configPath = path.join(getUserDataPath(), 'config.json')
@@ -960,6 +835,7 @@ export const setConfig = async (config: Partial<AppConfig>): Promise<void> => {
     await fs.promises.rename(tmpPath, configPath)
   } catch (error) {
     log.error('Error writing config:', error)
+    // Clean up temp file
     try {
       if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
     } catch {}
@@ -1000,6 +876,7 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
+  // Remove llama.cpp binaries
   const llamaCppPath = path.join(getInstallDir(), 'llama.cpp')
   if (fs.existsSync(llamaCppPath)) {
     try {
@@ -1010,6 +887,7 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
+  // Remove downloaded models (huggingface + any user-added models)
   const modelsPath = path.join(getInstallDir(), 'models')
   if (fs.existsSync(modelsPath)) {
     try {
@@ -1020,6 +898,7 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
+  // Remove service lock files
   const locksPath = path.join(getUserDataPath(), 'locks')
   if (fs.existsSync(locksPath)) {
     try {
@@ -1030,6 +909,7 @@ export const resetApp = async (): Promise<void> => {
     }
   }
 
+  // Clear Electron session data (localStorage, cookies, cache, etc.)
   try {
     const { session } = require('electron')
     await session.defaultSession.clearStorageData()

@@ -1,34 +1,67 @@
 import { ipcRenderer, contextBridge } from 'electron'
 
-// Relay typed {type, data} messages between desktop and guest; keep business logic outside this preload.
+// Bridge the embedded WebUI theme, local model events, and allowed requests.
 
 type EventCallback = (data: any) => void
 const eventCallbacks: EventCallback[] = []
-const pendingEvents: any[] = []
-const MAX_PENDING_EVENTS = 50
 
+// Embedder → Guest (push events from desktop)
 ipcRenderer.on('desktop:event', (_event, data) => {
-  if (eventCallbacks.length === 0) {
-    pendingEvents.push(data)
-    if (pendingEvents.length > MAX_PENDING_EVENTS) pendingEvents.shift()
-    return
-  }
   eventCallbacks.forEach((cb) => cb(data))
 })
 
-// Mirror Open WebUI theme changes through its applyTheme hook.
-contextBridge.exposeInMainWorld('applyTheme', () => {
+// ─── Theme Sync: Open WebUI → Desktop ───────────────────
+let lastToken: string | null = null
+const syncToken = (): void => {
+  const token = localStorage.getItem('token') || ''
+  if (token === lastToken) return
+  lastToken = token
+  ipcRenderer.sendToHost('webview:send', { type: 'token:update', token })
+}
+let lastTheme = ''
+const syncTheme = (): void => {
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return
   const theme = localStorage.getItem('theme') ?? 'system'
-  ipcRenderer.sendToHost('webview:event', { type: 'theme:update', data: { theme } })
+  const resolvedTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+  const background =
+    document.querySelector('meta[name="theme-color"]')?.getAttribute('content') ||
+    (resolvedTheme === 'dark' ? '#171717' : '#ffffff')
+  const signature = JSON.stringify({ theme, resolvedTheme, background })
+  if (signature === lastTheme) return
+  lastTheme = signature
+  ipcRenderer.sendToHost('webview:event', {
+    type: 'theme:update',
+    data: { theme, resolvedTheme, background }
+  })
+}
+
+// Run after WebUI finishes changing its classes, palette, and theme-color metadata.
+const scheduleTheme = (): void => queueMicrotask(syncTheme)
+contextBridge.exposeInMainWorld('applyTheme', scheduleTheme)
+window.addEventListener('DOMContentLoaded', () => {
+  syncToken()
+  const tokenTimer = setInterval(syncToken, 2000)
+  window.addEventListener('unload', () => clearInterval(tokenTimer), { once: true })
+  const observer = new MutationObserver(scheduleTheme)
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'style']
+  })
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) observer.observe(meta, { attributes: true, attributeFilter: ['content'] })
+  syncTheme()
+  window.addEventListener('unload', () => observer.disconnect(), { once: true })
 })
 
+// Expose to the Open WebUI page via contextBridge (secure, unforgeable)
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Push events: desktop → Open WebUI
   onEvent: (callback: EventCallback): void => {
     eventCallbacks.push(callback)
-    const queued = pendingEvents.splice(0)
-    queued.forEach((event) => callback(event))
+    ipcRenderer.sendToHost('webview:ready')
   },
 
+  // Request/Response: Open WebUI → desktop
   send: (data: any): Promise<any> => {
     return new Promise((resolve) => {
       const id = Math.random().toString(36).slice(2)
@@ -41,9 +74,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('desktop:response', handler)
       ipcRenderer.sendToHost('webview:send', { ...data, _requestId: id })
     })
-  },
-
-  load: (page: string): void => {
-    ipcRenderer.sendToHost('webview:load', page)
   }
 })

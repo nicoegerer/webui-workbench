@@ -17,8 +17,9 @@ export const managedServicesApi = {
   getManagedService: (id: string): Promise<ManagedServiceDefinition> => request('get', { id }),
   previewManagedService: (service: unknown): Promise<ManagedServiceDefinition> =>
     request('preview', { service }),
-  saveManagedService: (service: ManagedServiceDefinition): Promise<ManagedServiceSnapshot> =>
-    request('upsert', { service }),
+  saveManagedService: (
+    service: Omit<ManagedServiceDefinition, 'id'> & { id?: string }
+  ): Promise<ManagedServiceSnapshot> => request('upsert', { service }),
   removeManagedService: (id: string): Promise<boolean> => request('remove', { id }),
   startManagedService: (id: string): Promise<ManagedServiceSnapshot> => request('start', { id }),
   stopManagedService: (id: string): Promise<ManagedServiceSnapshot> => request('stop', { id }),

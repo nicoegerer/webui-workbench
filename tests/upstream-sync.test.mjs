@@ -192,6 +192,43 @@ test('manifest reconciliation keeps deletions and never chooses a conflicting de
   assert.equal({}.retained, undefined)
 })
 
+test('ported forks keep independent release notes when official versions overlap or history changes', (t) => {
+  const f = fixture(t)
+  const original = readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8')
+  f.write('CHANGELOG.md', original.replace('\n## [', '\n## [0.1.0]\n\nWorkbench notes\n\n## ['))
+  f.write('docs/desktop-upstream-changelog.md', original)
+  f.commit('separate official and Workbench release notes')
+  f.git('checkout', 'main')
+  f.write(
+    'CHANGELOG.md',
+    original.replace('\n## [', '\n## [0.1.0]\n\nOfficial Desktop notes\n\n## [')
+  )
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('official overlapping version'))
+  f.git('checkout', 'release')
+  assert.equal(prepareSync(f.cwd, 'v0.11.1').version, '0.1.1')
+  const fork = readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8')
+  const desktop = readFileSync(join(f.cwd, 'docs/desktop-upstream-changelog.md'), 'utf8')
+  assert.ok(fork.includes('Workbench notes'))
+  assert.ok(!fork.includes('Official Desktop notes'))
+  assert.ok(desktop.includes('Official Desktop notes'))
+  assert.ok(!desktop.includes('Workbench notes'))
+  f.git('merge-base', '--is-ancestor', 'upstream/main', 'HEAD')
+  assert.equal(prepareSync(f.cwd, 'v0.11.1').changed, false)
+
+  f.git('checkout', 'main')
+  f.write('CHANGELOG.md', original.replace('Official release', 'Corrected official release'))
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('official corrected history'))
+  f.git('checkout', 'release')
+  assert.equal(prepareSync(f.cwd, 'v0.11.1').version, '0.1.2')
+  assert.ok(readFileSync(join(f.cwd, 'CHANGELOG.md'), 'utf8').includes('Workbench notes'))
+  assert.ok(
+    readFileSync(join(f.cwd, 'docs/desktop-upstream-changelog.md'), 'utf8').includes(
+      'Corrected official release'
+    )
+  )
+  assert.equal(prepareSync(f.cwd, 'v0.11.1').changed, false)
+})
+
 test('changelog reconciliation refuses edited history or overlapping new version notes', () => {
   const base = '# Changelog\n\n## [1.0.0]\n\nOriginal\n'
   const ours = base.replace('\n## [', '\n## [1.1.0]\n\nFork\n\n## [')
@@ -283,6 +320,33 @@ test('45 quiet days keep scheduling alive without source changes or another rele
   assert.equal(result.version, '0.1.0')
 })
 
+test('a fully formatted prepared release does not require an empty release commit', (t) => {
+  const f = fixture(t)
+  f.git('checkout', '-b', 'prepared', 'origin/managed-services')
+  for (const [file, value] of [
+    ['package.json', { name: 'fixture', version: '0.2.0' }],
+    ['package-lock.json', { version: '0.2.0', packages: { '': { version: '0.2.0' } } }]
+  ])
+    f.write(file, JSON.stringify(value, null, 2) + '\n')
+  f.write(
+    'CHANGELOG.md',
+    '# Changelog\n\n## [0.2.0] - 2026-11-03\n\nPrepared port\n\n## [0.0.20]\n\nOfficial release\n'
+  )
+  f.git(
+    'update-ref',
+    'refs/remotes/origin/managed-services',
+    f.commit('formatted prepared release')
+  )
+  f.git('checkout', 'release')
+  assert.deepEqual(prepareSync(f.cwd, 'v0.11.1'), {
+    changed: true,
+    version: '0.2.0',
+    backend: '0.11.1'
+  })
+  assert.equal(f.git('status', '--porcelain'), '')
+  assert.equal(prepareSync(f.cwd, 'v0.11.1').changed, false)
+})
+
 test('maintenance refuses local changes and invalid timestamps', (t) => {
   const f = fixture(t)
   assert.throws(() => keepSyncActive(f.cwd, NaN), /timestamp/)
@@ -326,6 +390,10 @@ test('workflow explicitly dispatches releases and keeps the default branch curre
   assert.ok(source.includes('--atomic'))
   assert.ok(source.includes('--repo open-webui/open-webui'))
   assert.ok(source.indexOf('npm run test:ipc') < source.indexOf('git push --atomic'))
+  assert.ok(
+    source.includes('git show origin/managed-services:.github/scripts/prepare-upstream-sync.mjs')
+  )
+  assert.ok(source.includes('node "$RUNNER_TEMP/prepare-upstream-sync.mjs" "$BACKEND_TAG"'))
 })
 
 test('every gh operation targets an explicit repository after adding upstream', () => {

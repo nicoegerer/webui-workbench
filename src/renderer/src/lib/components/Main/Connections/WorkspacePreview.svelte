@@ -44,7 +44,7 @@
         if (result.ok) closeServer(result.preview)
         return
       }
-      if (!result.ok) {
+      if (result.ok === false) {
         error =
           result.code === 'ENTRY_NOT_FOUND'
             ? 'Diese HTML-Datei wurde im Arbeitsbereich nicht gefunden. Prüfe den Dateinamen.'

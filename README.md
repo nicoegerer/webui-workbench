@@ -38,7 +38,7 @@ This distribution has a separate application ID, profile directory and update fe
 
 ## First chat
 
-1. Launch the app and choose to install a local Open WebUI runtime or connect to your own instance.
+1. Launch the app and install the managed local Open WebUI runtime. Optional local model engines are available through llama.cpp and Ollama.
 2. Configure a model provider in Open WebUI; a model subscription/key is not included.
 3. Send a simple chat message before adding optional tools.
 4. Add only the connectors you need. For local or cloud file work, select a workspace next to the message box.
