@@ -1,6 +1,8 @@
 name: Verify Workbench
 
 on:
+  push:
+    branches: [managed-services, release]
   pull_request:
     branches: [managed-services, release]
   workflow_dispatch:

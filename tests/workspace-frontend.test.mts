@@ -103,6 +103,54 @@ test('Open WebUI 0.13 retains native per-tab cwd restoration without rewriting i
   )
 })
 
+test('Open WebUI 0.13.3 preserves project folders and terminal-scoped directory restoration', () => {
+  const source = `
+    $: effectiveTerminalId = terminalId ?? $selectedTerminalId;
+    savedPath =
+      terminalContext && terminalContext.terminalId === effectiveTerminalId
+        ? terminalContext.currentDirectory
+        : folderDirectory || serverPath;
+  `
+  const map = { ...sourceMap, sourcesContent: [source] }
+  const original =
+    'return context&&context.terminalId===terminal?context.currentDirectory:folder||cwd;'
+  for (const content of [source, source.replace(/\s+/g, ' ')]) {
+    const patched = patchWorkspaceFileNav(original, { ...map, sourcesContent: [content] })!
+    assert.equal(patched, original, 'Native project-folder support needs no generated-code patch')
+    const initialize = new Function('context', 'terminal', 'folder', 'cwd', patched)
+    assert.equal(
+      initialize(
+        { terminalId: 'same', currentDirectory: '/restored' },
+        'same',
+        '/project',
+        '/server'
+      ),
+      '/restored'
+    )
+    assert.equal(
+      initialize(
+        { terminalId: 'other', currentDirectory: '/stale' },
+        'same',
+        '/project',
+        '/server'
+      ),
+      '/project'
+    )
+    assert.equal(initialize(null, 'same', null, '/server'), '/server')
+    assert.equal(patchWorkspaceFileNav(patched, map), patched)
+  }
+  for (const changed of [
+    source.replace('=== effectiveTerminalId', '=== otherTerminalId'),
+    source.replace('folderDirectory || serverPath', 'unrelatedDirectory'),
+    source.replace('terminalContext.currentDirectory', 'otherContext')
+  ]) {
+    assert.throws(
+      () => patchWorkspaceFileNav(original, { ...map, sourcesContent: [changed] }),
+      /changed/
+    )
+  }
+})
+
 test('stored short, regional and unknown languages always have a shipped fallback', () => {
   const available = ['de-DE', 'en-GB', 'en-US', 'fr-FR', 'pt-BR']
   for (const [locale, expected] of [

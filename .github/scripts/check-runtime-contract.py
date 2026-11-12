@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VERSIONS = json.loads((ROOT / 'src/shared/runtime-versions.json').read_text())
 parser = argparse.ArgumentParser()
 parser.add_argument('--frontend-output', type=Path)
+parser.add_argument('--webui-version', default=VERSIONS['openWebUI'])
 args = parser.parse_args()
 subprocess.run([sys.executable, '-B', str(ROOT / 'tests/test_workspace_write_guard.py')], check=True)
 
@@ -27,11 +28,13 @@ subprocess.run([sys.executable, '-B', str(ROOT / 'tests/test_workspace_write_gua
 def published_wheel(package, version):
     with urlopen(f'https://pypi.org/pypi/{package}/{version}/json', timeout=60) as response:
         release = json.load(response)
-    wheel = next(item for item in release['urls'] if item['filename'].endswith('.whl'))
-    assert wheel['url'].startswith('https://files.pythonhosted.org/'), 'Unexpected package host'
+    wheel = next((item for item in release['urls'] if item['filename'].endswith('.whl')), None)
+    if wheel is None or not wheel['url'].startswith('https://files.pythonhosted.org/'):
+        raise RuntimeError('Published wheel is missing or has an unexpected host')
     with urlopen(wheel['url'], timeout=120) as response:
         data = response.read()
-    assert hashlib.sha256(data).hexdigest() == wheel['digests']['sha256']
+    if hashlib.sha256(data).hexdigest() != wheel['digests']['sha256']:
+        raise RuntimeError('Published wheel SHA-256 mismatch')
     return zipfile.ZipFile(io.BytesIO(data))
 
 
@@ -78,96 +81,109 @@ async def check_resolver(source):
     print('Published resolver: filesystem tools survive 135 connector functions + 128-tool router limit')
 
 
-webui = published_wheel('open-webui', VERSIONS['openWebUI'])
-asyncio.run(check_resolver(webui.read('open_webui/utils/tools.py').decode()))
-# The desktop imports the shipped stores. Legacy FileNav needs a remount;
-# native ChatTabs owns its terminal contexts and must retain every open tab.
-# Fail the upstream-sync/release gates
-# when that contract changes; do not silently ship a stale file panel.
-frontend_sources = {}
-wanted = ('src/lib/stores/index.ts', 'src/lib/components/chat/FileNav.svelte',
-          'src/lib/apis/terminal/index.ts')
-panel_sources = ('src/lib/components/chat/ChatControls.svelte',
-                 'src/lib/components/chat/ChatTabs.svelte')
-panel_source = None
-for name in webui.namelist():
-    if not name.endswith('.js.map') or '/_app/immutable/' not in name:
-        continue
-    source_map = json.loads(webui.read(name))
-    if any(source.endswith('/components/chat/FileNav.svelte') for source in source_map.get('sources', [])):
-        subprocess.run(['node', '--experimental-strip-types', str(ROOT / '.github/scripts/check-workspace-frontend.mts')],
-                       input=json.dumps({'code': webui.read(name[:-4]).decode(), 'map': source_map}), text=True, check=True)
-    for source, content in zip(source_map.get('sources', []), source_map.get('sourcesContent', [])):
-        for target in wanted:
-            if source.endswith(target):
-                frontend_sources[target] = content
-        if any(source.endswith(target) for target in panel_sources):
-            panel_source = content
-    if len(frontend_sources) == len(wanted) and panel_source is not None:
-        break
-assert len(frontend_sources) == len(wanted) and panel_source is not None, 'Required shipped frontend source maps are missing'
-stores = frontend_sources[wanted[0]]
-for name in ('terminalServers', 'selectedTerminalId', 'showFileNavPath', 'showFileNavDir', 'tools'):
-    assert f'export const {name}' in stores, f'Frontend store contract changed: {name}'
-assert 'export const showControls' in stores or 'export const showTabs' in stores
-if 'export const showTabs' in stores:
-    assert "$showTabs === 'files' && showFilesTab" in panel_source
-    assert 'terminalId={tab.terminalId}' in panel_source and 'initialDirectory=' in panel_source
-else:
-    assert "activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId" in panel_source
-file_nav = frontend_sources[wanted[1]]
-assert 'showFileNavPath.subscribe' in file_nav and 'getCwd(' in file_nav
-cwd_api = frontend_sources[wanted[2]]
-assert '/files/cwd' in cwd_api and "headers['X-Session-Id'] = sessionId" in cwd_api
-print('Published frontend: terminal-scoped panels, file-navigation stores and per-chat cwd contract verified')
-if args.frontend_output:
-    # Only compiled frontend assets into an explicitly selected CI/test directory.
-    prefix = 'open_webui/frontend/'
+def check_contract(webui_version, terminal_version, frontend_output=None):
+    webui = published_wheel('open-webui', webui_version)
+    asyncio.run(check_resolver(webui.read('open_webui/utils/tools.py').decode()))
+    # The desktop imports the shipped stores. Legacy FileNav needs a remount;
+    # native ChatTabs owns its terminal contexts and must retain every open tab.
+    # Fail the upstream-sync/release gates
+    # when that contract changes; do not silently ship a stale file panel.
+    frontend_sources = {}
+    wanted = ('src/lib/stores/index.ts', 'src/lib/components/chat/FileNav.svelte',
+              'src/lib/apis/terminal/index.ts')
+    panel_sources = ('src/lib/components/chat/ChatControls.svelte',
+                     'src/lib/components/chat/ChatTabs.svelte')
+    panel_source = None
     for name in webui.namelist():
-        if not name.startswith(prefix + '_app/immutable/') or name.endswith('/'):
+        if not name.endswith('.js.map') or '/_app/immutable/' not in name:
             continue
-        relative = Path(name[len(prefix):])
-        if '..' in relative.parts or relative.is_absolute():
-            raise RuntimeError('Unsafe wheel entry')
-        target = args.frontend_output / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(webui.read(name))
-middleware = webui.read('open_webui/utils/middleware.py').decode()
-assert "form_data.pop('terminal_id'" in middleware or 'form_data.pop("terminal_id"' in middleware
-assert 'get_terminal_tools(' in middleware and 'get_tools(' in middleware
-terminal = published_wheel('open-terminal', VERSIONS['openTerminal'])
-terminal_cli = ast.parse(terminal.read('open_terminal/cli.py').decode())
-# The compatibility hook must run after CLI configuration and immediately before
-# the official application import. Reject an incompatible upstream launch path.
-server_calls = [
-    node for node in ast.walk(terminal_cli)
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    and isinstance(node.func.value, ast.Name) and node.func.value.id == 'uvicorn'
-    and node.func.attr == 'run'
-]
-assert server_calls, 'Open Terminal CLI no longer calls uvicorn.run'
-for call in server_calls:
-    app_argument = call.args[0] if call.args else next(
-        (keyword.value for keyword in call.keywords if keyword.arg == 'app'), None)
-    assert isinstance(app_argument, ast.Constant) and app_argument.value == 'open_terminal.main:app', (
-        'Open Terminal CLI application import contract changed')
-print('Published terminal CLI: deferred HTTP compatibility hook verified')
-terminal_source = terminal.read('open_terminal/main.py').decode()
-terminal_tree = ast.parse(terminal_source)
-filesystem = ast.parse(terminal.read('open_terminal/utils/fs.py').decode())
-fs_class = next(node for node in filesystem.body if isinstance(node, ast.ClassDef) and node.name == 'UserFS')
-methods = {node.name: node for node in fs_class.body if isinstance(node, ast.AsyncFunctionDef)}
-for method, parameters in {'write': ('path',), 'write_bytes': ('path',), 'mkdir': ('path',),
-                           'remove': ('path',), 'move': ('source', 'destination')}.items():
-    assert method in methods and set(parameters).issubset({arg.arg for arg in methods[method].args.args}), method
-operation_names = {
-    node.name for node in ast.walk(terminal_tree)
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-} | {
-    node.value.value for node in ast.walk(terminal_tree)
-    if isinstance(node, ast.keyword) and node.arg == 'operation_id'
-    and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
-}
-for name in ('write_file', 'read_file', 'run_command'):
-    assert name in operation_names, f'Open Terminal lost {name}'
-print(f"Runtime contract passed: Open WebUI {VERSIONS['openWebUI']}, Open Terminal {VERSIONS['openTerminal']}")
+        source_map = json.loads(webui.read(name))
+        if any(source.endswith('/components/chat/FileNav.svelte') for source in source_map.get('sources', [])):
+            subprocess.run(['node', '--experimental-strip-types', str(ROOT / '.github/scripts/check-workspace-frontend.mts')],
+                           input=json.dumps({'code': webui.read(name[:-4]).decode(), 'map': source_map}), text=True, check=True)
+        for source, content in zip(source_map.get('sources', []), source_map.get('sourcesContent', [])):
+            for target in wanted:
+                if source.endswith(target):
+                    frontend_sources[target] = content
+            if any(source.endswith(target) for target in panel_sources):
+                panel_source = content
+        if len(frontend_sources) == len(wanted) and panel_source is not None:
+            break
+    assert len(frontend_sources) == len(wanted) and panel_source is not None, 'Required shipped frontend source maps are missing'
+    stores = frontend_sources[wanted[0]]
+    for name in ('terminalServers', 'selectedTerminalId', 'showFileNavPath', 'showFileNavDir', 'tools'):
+        assert f'export const {name}' in stores, f'Frontend store contract changed: {name}'
+    assert 'export const showControls' in stores or 'export const showTabs' in stores
+    if 'export const showTabs' in stores:
+        assert "$showTabs === 'files' && showFilesTab" in panel_source, (
+            'Native ChatTabs no longer accepts the workspace Files request')
+        assert 'terminalId={tab.terminalId}' in panel_source and 'initialDirectory=' in panel_source
+    else:
+        assert "activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId" in panel_source
+    file_nav = frontend_sources[wanted[1]]
+    assert 'showFileNavPath.subscribe' in file_nav and 'getCwd(' in file_nav
+    cwd_api = frontend_sources[wanted[2]]
+    assert '/files/cwd' in cwd_api and "headers['X-Session-Id'] = sessionId" in cwd_api
+    print('Published frontend: terminal-scoped panels, file-navigation stores and per-chat cwd contract verified')
+    if frontend_output:
+        # Only compiled frontend assets into an explicitly selected CI/test directory.
+        prefix = 'open_webui/frontend/'
+        for name in webui.namelist():
+            if not name.startswith(prefix + '_app/immutable/') or name.endswith('/'):
+                continue
+            relative = Path(name[len(prefix):])
+            if '..' in relative.parts or relative.is_absolute():
+                raise RuntimeError('Unsafe wheel entry')
+            target = frontend_output / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(webui.read(name))
+    middleware = webui.read('open_webui/utils/middleware.py').decode()
+    assert "form_data.pop('terminal_id'" in middleware or 'form_data.pop("terminal_id"' in middleware
+    assert 'get_terminal_tools(' in middleware and 'get_tools(' in middleware
+    terminal = published_wheel('open-terminal', terminal_version)
+    terminal_cli = ast.parse(terminal.read('open_terminal/cli.py').decode())
+    # The compatibility hook must run after CLI configuration and immediately before
+    # the official application import. Reject an incompatible upstream launch path.
+    server_calls = [
+        node for node in ast.walk(terminal_cli)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == 'uvicorn'
+        and node.func.attr == 'run'
+    ]
+    assert server_calls, 'Open Terminal CLI no longer calls uvicorn.run'
+    for call in server_calls:
+        app_argument = call.args[0] if call.args else next(
+            (keyword.value for keyword in call.keywords if keyword.arg == 'app'), None)
+        assert isinstance(app_argument, ast.Constant) and app_argument.value == 'open_terminal.main:app', (
+            'Open Terminal CLI application import contract changed')
+    print('Published terminal CLI: deferred HTTP compatibility hook verified')
+    terminal_source = terminal.read('open_terminal/main.py').decode()
+    terminal_tree = ast.parse(terminal_source)
+    filesystem = ast.parse(terminal.read('open_terminal/utils/fs.py').decode())
+    fs_class = next(node for node in filesystem.body if isinstance(node, ast.ClassDef) and node.name == 'UserFS')
+    methods = {node.name: node for node in fs_class.body if isinstance(node, ast.AsyncFunctionDef)}
+    for method, parameters in {'write': ('path',), 'write_bytes': ('path',), 'mkdir': ('path',),
+                               'remove': ('path',), 'move': ('source', 'destination')}.items():
+        assert method in methods and set(parameters).issubset({arg.arg for arg in methods[method].args.args}), method
+    operation_names = {
+        node.name for node in ast.walk(terminal_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    } | {
+        node.value.value for node in ast.walk(terminal_tree)
+        if isinstance(node, ast.keyword) and node.arg == 'operation_id'
+        and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    }
+    for name in ('write_file', 'read_file', 'run_command'):
+        assert name in operation_names, f'Open Terminal lost {name}'
+    print(f"Runtime contract passed: Open WebUI {webui_version}, Open Terminal {terminal_version}")
+
+
+try:
+    check_contract(args.webui_version, VERSIONS['openTerminal'], args.frontend_output)
+except (AssertionError, StopIteration) as error:
+    print(f'Runtime compatibility mismatch: {error or "required upstream contract is missing"}', file=sys.stderr)
+    sys.exit(78)
+except subprocess.CalledProcessError as error:
+    if error.returncode == 78:
+        sys.exit(78)
+    raise

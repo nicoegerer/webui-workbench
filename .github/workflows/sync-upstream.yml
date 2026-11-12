@@ -10,8 +10,12 @@ on:
       - '.github/scripts/keep-sync-active.mjs'
       - '.github/scripts/check-public-distribution.mjs'
       - '.github/scripts/check-runtime-contract.py'
+      - '.github/scripts/check-workspace-frontend.mts'
       - 'tests/upstream-sync.test.mjs'
+      - 'tests/workspace-frontend.test.mts'
       - 'package.json'
+      - 'package-lock.json'
+      - 'src/main/services/workspace-frontend.ts'
       - 'src/shared/runtime-versions.json'
   schedule:
     - cron: '17 6 * * *'
@@ -40,6 +44,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Configure git
         run: |
