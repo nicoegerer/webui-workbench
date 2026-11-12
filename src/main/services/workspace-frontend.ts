@@ -55,13 +55,17 @@ export function patchWorkspaceFileNav(code: string, map: SourceMap): string | nu
   )
   if (sourceIndex < 0) return null
   const source = map.sourcesContent[sourceIndex]
+  // Native FileNav owns initialization through its terminal prop. Keep upstream
+  // code intact as its folder/view restoration evolves; browser gates exercise
+  // the resulting behavior instead of matching one initializer's source text.
+  if (/export\s+let\s+terminalId\b/.test(source ?? '') &&
+      /effectiveTerminalId\s*=\s*terminalId\s*\?\?\s*\$selectedTerminalId/.test(source ?? '') &&
+      /getCwd\s*\(/.test(source ?? '')) return code
   // 0.13 gives each native tab its own terminal and context. Preserve that
   // implementation, including per-tab directory restoration and editor state.
   if (
-    source?.includes('effectiveTerminalId = terminalId ?? $selectedTerminalId') &&
-    source.includes('terminalContext.terminalId === effectiveTerminalId') &&
-    source.includes('terminalContext.currentDirectory') &&
-    source.includes(': serverPath;')
+    /effectiveTerminalId\s*=\s*terminalId\s*\?\?\s*\$selectedTerminalId\s*;/.test(source ?? '') &&
+    /savedPath\s*=\s*terminalContext\s*&&\s*terminalContext\.terminalId\s*===\s*effectiveTerminalId\s*\?\s*terminalContext\.currentDirectory\s*:\s*(?:folderDirectory\s*\|\|\s*)?serverPath\s*;/.test(source ?? '')
   )
     return code
   const oldInitialization = source?.includes("const useServerPath = !!chatId || savedPath === '/';")

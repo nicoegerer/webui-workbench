@@ -3,14 +3,19 @@ import { patchWorkspaceFileNav } from '../../src/main/services/workspace-fronten
 let input = ''
 for await (const chunk of process.stdin) input += chunk
 const { code, map } = JSON.parse(input)
-const patched = patchWorkspaceFileNav(code, map)
-assert.ok(patched, 'Required FileNav compatibility contract is missing')
-assert.equal(patched.length, code.length, 'Generated source-map columns must be preserved')
-assert.equal(
-  patchWorkspaceFileNav(patched, map),
-  patched,
-  'Runtime compatibility must be idempotent'
-)
+try {
+  const patched = patchWorkspaceFileNav(code, map)
+  assert.ok(patched, 'Required FileNav compatibility contract is missing')
+  assert.equal(patched.length, code.length, 'Generated source-map columns must be preserved')
+  assert.equal(
+    patchWorkspaceFileNav(patched, map),
+    patched,
+    'Runtime compatibility must be idempotent'
+  )
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error)
+  process.exit(78) // A known runtime contract mismatch, distinct from setup/network failures.
+}
 console.log(
   'Published FileNav: terminal-scoped initialization and idempotent compatibility verified'
 )

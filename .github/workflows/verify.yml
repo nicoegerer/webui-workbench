@@ -1,6 +1,8 @@
 name: Verify Workbench
 
 on:
+  push:
+    branches: [managed-services, release]
   pull_request:
     branches: [managed-services, release]
   workflow_dispatch:
@@ -38,9 +40,15 @@ jobs:
       - run: npm run build
       - run: python .github/scripts/check-runtime-contract.py --frontend-output "${{ env.OPEN_WEBUI_FRONTEND }}"
       - name: Prepare Electron before parallel browser tests
-        if: runner.os == 'Windows'
         # Electron 45 installs lazily; concurrent downloads can lock its EXE on Windows.
         run: node node_modules/electron/install.js
       - name: Exercise real Chromium and published WebUI components
         if: runner.os == 'Windows'
         run: node --experimental-strip-types --test tests/workspace-preview.browser.mts tests/workspace-switch.browser.mts tests/settings-locales.browser.mts tests/service-settings.browser.mts
+      - name: Exercise real Chromium and published WebUI components on Linux
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: |
+          xvfb-run --auto-servernum node --experimental-strip-types --test tests/workspace-preview.browser.mts tests/workspace-switch.browser.mts tests/settings-locales.browser.mts tests/service-settings.browser.mts
+          WORKSPACE_BROWSER_WIDTH=640 xvfb-run --auto-servernum node --experimental-strip-types --test tests/workspace-switch.browser.mts

@@ -22,6 +22,7 @@ test('native file tabs lease their own workspace even after the composer selects
     ['desktop-ws-first', 'desktop-gh-second']
   )
   assert.deepEqual(nativeTabWorkspaceLeases([], ['desktop-ws-idle']), [])
+  assert.deepEqual(nativeTabWorkspaceLeases(['main-chat'], ['desktop-ws-idle']), [])
   assert.deepEqual(nativeTabWorkspaceLeases(['files:https://user.example'], []), [])
 })
 

@@ -27,14 +27,16 @@ The default branch is `managed-services`; `release` builds the fork. Both receiv
 
 1. GitHub Actions is scheduled daily at **06:17 UTC**. GitHub can delay scheduled runs, sometimes substantially; this is not a precise-time guarantee.
 2. It fetches official Desktop `main` and the latest stable Open WebUI runtime release.
-3. It merges into a candidate, keeps fork changes and updates `src/shared/runtime-versions.json` when needed.
-4. Unit/regression tests, build and the runtime compatibility contract must pass before an atomic, non-forced push.
+3. It merges into a candidate and keeps fork changes. Before updating `src/shared/runtime-versions.json`, it probes the latest Open WebUI wheel with the candidate's runtime compatibility contract. An explicit compatibility mismatch defers that runtime update, retains the tested pin and records a notice in the run summary. The next sync retries the latest stable release.
+4. Unit/regression tests, build, the runtime compatibility contract and real Chromium tests against that runtime's shipped frontend must pass before an atomic, non-forced push. The sync therefore checks workspace switching, native editors, previews and settings before advancing either shipping branch.
 5. The workflow explicitly starts the release pipeline because pushes made by `GITHUB_TOKEN` do not trigger another push workflow. Users do not need to click Run workflow.
 6. All required platform packaging jobs must pass before release assets and matching update manifests are published.
 
 The atomic push updates `managed-services` and `release`. It does not also advance the auxiliary `main` snapshot: pristine upstream workflow files can require a `workflows` permission that `GITHUB_TOKEN` cannot grant itself. This does not change which Desktop source commits or Open WebUI features are integrated into the shipping branches.
 
-Stable Open WebUI releases are selected without a minor-version ceiling. The candidate adopts the complete upstream interface and features; compatibility failures require adapting Workbench's extensions before publication, rather than holding the automatic selector on an older release.
+Stable Open WebUI releases are selected without a minor-version ceiling. A compatible candidate adopts the complete upstream interface and features. An incompatible runtime waits until Workbench's extensions support it; the existing tested version continues to build. This is a temporary deferral, not a fixed version ceiling. Deferring an otherwise unchanged runtime does not bump the Workbench version or start repeated releases.
+
+Only explicit upstream contract mismatches use this deferral. Network failures, dependency installation failures, merge conflicts, regressions and build failures still fail the run and prevent publication. The final compatibility gate also remains mandatory for the runtime actually being shipped. Direct pushes and pull requests to the shipping branches run verification; changes to frontend compatibility code also trigger the sync workflow.
 
 Routine version/identity overlaps in `package.json` and `package-lock.json` use a constrained three-way merge: fork-owned identity fields stay local, independent official dependency changes are retained, and competing dependency changes fail closed. Official Desktop release notes are refreshed in [their own snapshot](desktop-upstream-changelog.md); Workbench's Changelog retains its independent version history. This handles overlapping official and fork version numbers without discarding either project's notes. Source and dependency conflicts still stop publication.
 
@@ -52,7 +54,7 @@ An upstream update notice may appear before the fork's daily check and builds fi
 
 ## Maintenance limits
 
-“Automatic” means no routine manual workflow triggering, not that all future changes are compatible. Merge conflicts, failed tests, API changes, permission changes, disabled Actions or exhausted CI availability need intervention. The workflow stops rather than discarding fork changes or publishing a broken candidate.
+“Automatic” means no routine manual workflow triggering, not that all future changes are compatible. Known incompatible runtime updates are deferred with a visible notice. Merge conflicts, failed tests, other API changes, permission changes, disabled Actions or exhausted CI availability can still need intervention. The workflow stops rather than discarding fork changes or publishing a broken candidate.
 
 Runtime/connector accounts are not authenticated by the public build. A passing release does not guarantee that every provider, account policy or model supports every tool. Windows CI runs extra real-HTTP and isolated-browser regressions; platform packaging is not equivalent to exhaustive manual testing on every OS.
 
@@ -64,6 +66,8 @@ Workbench 0.2 integrates the Desktop 0.1.4 architecture and subsequent upstream 
 
 Open Terminal remains available under its Workbench settings tab and starts for selected project folders. Runtime updates stay pinned to the versions checked by this fork, with a database backup before an automatic WebUI upgrade. The old remote Desktop connection picker, Spotlight and standalone voice window were removed upstream; Open WebUI's own chat and voice features remain available.
 
-Open WebUI 0.13.0 replaces the old controls sidebar with native chat tabs. Workbench adopts those tabs without resetting them when the composer workspace changes. Each Files tab keeps its own terminal and directory context; open file, editor and terminal tabs keep their workspace connections alive. The conditional Workbench **Website preview** action sits beside the corresponding Files tab and leaves Open WebUI's native preview, browser, terminal and editor features intact. Browser regressions exercise the actual components shipped in the runtime wheel.
+Open WebUI 0.13 introduced native chat tabs. Workbench currently integrates **Open WebUI 0.13.3**, including its persistent chat layouts and native Files lifecycle. Current FileNav code stays intact: Workbench no longer requires one exact initialization expression. The bridge detects the runtime's configured Files command and uses the translated native menu when shortcuts are disabled or unassigned; older runtimes retain their legacy adapter. Open file, editor and terminal tabs keep their workspace connections alive.
+
+The conditional Workbench **Website preview** action uses native ARIA tab/panel relationships and records which Files tab the workspace command opened. It does not assume that a native tab ID encodes its terminal. Open WebUI's own preview, browser, terminal, editor and split-layout features remain available. Browser regressions run the actual published components and the production store/command discovery on both Linux and Windows.
 
 The upstream and fork both used versions `0.1.x`. Their release notes are kept separately: this repository's Changelog records Workbench releases, and [the Desktop 0.1 notes](desktop-upstream-changelog.md) preserve the integrated upstream notes.

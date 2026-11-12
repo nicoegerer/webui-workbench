@@ -153,8 +153,26 @@ function mergeOfficialUpstream(cwd, git) {
   git('commit', '--no-edit')
 }
 
+/** Only explicit compatibility mismatches defer an update; infrastructure failures still fail CI. */
+export function verifyRuntimeCandidate(cwd, version, execute = execFileSync) {
+  try {
+    const output = execute(
+      'python',
+      ['.github/scripts/check-runtime-contract.py', '--webui-version', version],
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
+    )
+    process.stdout.write(output)
+    return true
+  } catch (error) {
+    if (error.status !== 78) throw error
+    const diagnostics = `${error.stdout ?? ''}\n${error.stderr ?? ''}`.trim()
+    console.log(`Open WebUI ${version} compatibility diagnostics:\n${diagnostics}`)
+    return false
+  }
+}
+
 /** Prepare only. CI tests the candidate before atomically pushing any branch. */
-export function prepareSync(cwd, backendTag) {
+export function prepareSync(cwd, backendTag, verifyRuntime = () => true) {
   const git = (...args) =>
     execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
   const read = (path) => JSON.parse(readFileSync(resolve(cwd, path), 'utf8'))
@@ -179,13 +197,16 @@ export function prepareSync(cwd, backendTag) {
   }
   const runtimePath = 'src/shared/runtime-versions.json'
   const runtime = read(runtimePath)
-  const runtimeChanged = compareStable(backendVersion, runtime.openWebUI) > 0
+  const requestedUpdate = compareStable(backendVersion, runtime.openWebUI) > 0
+  const runtimeChanged = requestedUpdate && verifyRuntime(cwd, backendVersion)
+  const deferred = requestedUpdate && !runtimeChanged ? { deferredBackend: backendVersion } : {}
   if (runtimeChanged) {
     runtime.openWebUI = backendVersion
     write(runtimePath, runtime)
   }
   const changed = baseline !== git('rev-parse', 'HEAD') || runtimeChanged
-  if (!changed) return { changed: false, version: previous, backend: runtime.openWebUI }
+  if (!changed)
+    return { changed: false, version: previous, backend: runtime.openWebUI, ...deferred }
   const pkg = read('package.json'),
     lock = read('package-lock.json')
   const version = nextForkVersion(previous, pkg.version)
@@ -211,11 +232,21 @@ export function prepareSync(cwd, backendTag) {
   if (git('diff', '--cached', '--name-only')) {
     git('commit', '-m', `chore: release v${version}`)
   }
-  return { changed: true, version, backend: runtime.openWebUI }
+  return { changed: true, version, backend: runtime.openWebUI, ...deferred }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const result = prepareSync(process.cwd(), process.argv[2] || '')
+  const result = prepareSync(process.cwd(), process.argv[2] || '', verifyRuntimeCandidate)
+  if (result.deferredBackend) {
+    const message = `Open WebUI ${result.deferredBackend} is not compatible yet; retaining tested Open WebUI ${result.backend}. The next sync retries the latest stable version.`
+    console.log(`::notice title=Runtime update deferred::${message}`)
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        `\n## Open WebUI update deferred\n\n${message}\n\nNo incompatible runtime was published. Compatibility diagnostics are in the candidate preparation log. Desktop and fork changes still require all verification gates before publication.\n`
+      )
+    }
+  }
   if (process.env.GITHUB_OUTPUT) {
     for (const [key, value] of Object.entries(result))
       appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`)

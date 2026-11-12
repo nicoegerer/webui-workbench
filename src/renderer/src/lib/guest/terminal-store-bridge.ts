@@ -15,9 +15,11 @@ interface TerminalStores {
   showFileNavPath?: { set(value: null): void }
   showFileNavDir?: { set(value: null): void }
   showSettings?: { set(value: string): void }
+  openFiles?: (terminalId: string, isCurrent: () => boolean) => Promise<boolean>
 }
 
 interface TerminalStoreBridge {
+  terminalLabel(): string | null
   hideFiles(): void
   openIntegrations(): boolean
   select(
@@ -45,6 +47,11 @@ export function createTerminalStoreBridge(
   let appliedContext: string | null = null
 
   return {
+    terminalLabel(): string | null {
+      const id = read(stores.selectedTerminalId)
+      const terminal = read(stores.terminalServers)?.find((entry) => entry?.id === id)
+      return typeof terminal?.name === 'string' && terminal.name ? terminal.name : id
+    },
     hideFiles(): void {
       if (stores.showTabs) stores.showTabs.set(false)
       else stores.showControls?.set(false)
@@ -120,7 +127,9 @@ export function createTerminalStoreBridge(
         }
         stores.selectedTerminalId.set(terminalId)
         if (terminalId && changed) {
-          if (stores.showTabs) stores.showTabs.set('files')
+          if (stores.openFiles) {
+            if (!(await stores.openFiles(terminalId, isCurrent)) || !isCurrent()) return false
+          } else if (stores.showTabs) stores.showTabs.set('files')
           else stores.showControls?.set(true)
         }
         appliedContext = workspace.context ?? ''

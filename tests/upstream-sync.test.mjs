@@ -10,7 +10,8 @@ import {
   prepareSync,
   nextForkVersion,
   mergeForkManifest,
-  mergeChangelogAdditions
+  mergeChangelogAdditions,
+  verifyRuntimeCandidate
 } from '../.github/scripts/prepare-upstream-sync.mjs'
 import { keepSyncActive } from '../.github/scripts/keep-sync-active.mjs'
 
@@ -71,6 +72,117 @@ test('backend-only update produces one release and preserves release-only fixes'
     'same upstream must not release forever'
   )
   assert.equal(prepareSync(f.cwd, 'v0.11.2').changed, false, 'no runtime downgrade')
+})
+
+test('an incompatible runtime is deferred without a release bump or dirty checkout, then retried', (t) => {
+  const f = fixture(t)
+  const before = f.git('rev-parse', 'HEAD')
+  const verify = (cwd, version) => {
+    assert.equal(cwd, f.cwd)
+    assert.equal(version, '0.13.3')
+    return false
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    assert.deepEqual(prepareSync(f.cwd, 'v0.13.3', verify), {
+      changed: false,
+      version: '0.1.0',
+      backend: '0.11.1',
+      deferredBackend: '0.13.3'
+    })
+    assert.equal(f.git('rev-parse', 'HEAD'), before)
+    assert.equal(f.git('status', '--porcelain'), '')
+    assert.equal(
+      JSON.parse(readFileSync(join(f.cwd, 'src/shared/runtime-versions.json'))).openWebUI,
+      '0.11.1'
+    )
+  }
+  assert.deepEqual(
+    prepareSync(f.cwd, 'v0.13.3', () => true),
+    {
+      changed: true,
+      version: '0.1.1',
+      backend: '0.13.3'
+    }
+  )
+  assert.equal(
+    prepareSync(f.cwd, 'v0.13.3', () => {
+      throw Error('Must not recheck a pinned version')
+    }).changed,
+    false
+  )
+})
+
+test('deferring a runtime still integrates Desktop and fork fixes for verification against the pinned runtime', (t) => {
+  const f = fixture(t)
+  f.git('checkout', 'main')
+  f.write('official-new.txt', 'upstream change\n')
+  f.git('update-ref', 'refs/remotes/upstream/main', f.commit('new upstream'))
+  f.git('checkout', 'release')
+  assert.deepEqual(
+    prepareSync(f.cwd, 'v0.13.3', () => false),
+    {
+      changed: true,
+      version: '0.1.1',
+      backend: '0.11.1',
+      deferredBackend: '0.13.3'
+    }
+  )
+  f.git('merge-base', '--is-ancestor', 'upstream/main', 'HEAD')
+  f.git('merge-base', '--is-ancestor', 'origin/managed-services', 'HEAD')
+  assert.equal(readFileSync(join(f.cwd, 'official-new.txt'), 'utf8'), 'upstream change\n')
+  assert.equal(readFileSync(join(f.cwd, 'release-only-fix.txt'), 'utf8'), 'must survive\n')
+  assert.equal(prepareSync(f.cwd, 'v0.13.3', () => false).changed, false)
+})
+
+test('runtime preflight distinguishes known incompatibility from network, setup and process failures', () => {
+  assert.equal(
+    verifyRuntimeCandidate('/fixture', '0.13.3', (command, args, options) => {
+      assert.equal(command, 'python')
+      assert.deepEqual(args, [
+        '.github/scripts/check-runtime-contract.py',
+        '--webui-version',
+        '0.13.3'
+      ])
+      assert.equal(options.cwd, '/fixture')
+      return ''
+    }),
+    true
+  )
+  const incompatible = Object.assign(new Error('Runtime changed'), {
+    status: 78,
+    stdout: '',
+    stderr: 'FileNav changed'
+  })
+  assert.equal(
+    verifyRuntimeCandidate('/fixture', '0.13.3', () => {
+      throw incompatible
+    }),
+    false
+  )
+  for (const status of [1, 2, 127, null]) {
+    const error = Object.assign(new Error('Network or setup failure'), { status })
+    assert.throws(
+      () =>
+        verifyRuntimeCandidate('/fixture', '0.13.3', () => {
+          throw error
+        }),
+      (thrown) => thrown === error
+    )
+  }
+})
+
+test('runtime preflight infrastructure failures abort preparation without updating manifests', (t) => {
+  const f = fixture(t)
+  const before = f.git('rev-parse', 'HEAD')
+  assert.throws(
+    () =>
+      prepareSync(f.cwd, 'v0.13.3', () => {
+        throw Error('PyPI unavailable')
+      }),
+    /PyPI unavailable/
+  )
+  assert.equal(f.git('rev-parse', 'HEAD'), before)
+  assert.equal(f.git('status', '--porcelain'), '')
 })
 
 test('upstream-only update merges all official changes and keeps fork fixes', (t) => {

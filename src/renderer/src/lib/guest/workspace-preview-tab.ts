@@ -48,9 +48,16 @@ export function createWorkspacePreviewTab(
     // only to the selected workspace's Files tab and preserve its tab controls.
     for (const tab of container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')) {
       const wrapper = tab.closest<HTMLElement>('[data-panel-tab]')
-      if (!wrapper || wrapper.dataset.panelTab !== `files:${current?.terminalId}`) continue
+      if (
+        !wrapper ||
+        (wrapper.dataset.panelTab !== `files:${current?.terminalId}` &&
+          wrapper.dataset.workbenchFilesTerminal !== current?.terminalId)
+      )
+        continue
       const panel = document.getElementById(tab.getAttribute('aria-controls') ?? '')
-      const header = container instanceof HTMLElement ? container.firstElementChild : null
+      const header =
+        tab.closest<HTMLElement>('[data-panel-tab-bar]') ??
+        (container instanceof HTMLElement ? container.firstElementChild : null)
       if (
         panel instanceof HTMLElement &&
         header instanceof HTMLElement &&
