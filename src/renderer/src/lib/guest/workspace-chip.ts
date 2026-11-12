@@ -1,5 +1,6 @@
 import { applyWorkspaceToPayload } from '../../../../shared/services/chat-payload.ts'
 import { createTerminalStoreBridge } from './terminal-store-bridge.ts'
+import { createNativeFilesOpener } from './native-files-opener.ts'
 import { createWorkspacePreviewTab } from './workspace-preview-tab.ts'
 import {
   resolveWorkspaceKeepIds,
@@ -25,6 +26,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var opts = ${JSON.stringify(options)};
   var applyWorkspaceToPayload = ${applyWorkspaceToPayload.toString()};
   var createTerminalStoreBridge = ${createTerminalStoreBridge.toString()};
+  var createNativeFilesOpener = ${createNativeFilesOpener.toString()};
   var createWorkspacePreviewTab = ${createWorkspacePreviewTab.toString()};
   var resolveWorkspaceKeepIds = ${resolveWorkspaceKeepIds.toString()};
   var nativeTabWorkspaceLeases = ${nativeTabWorkspaceLeases.toString()};
@@ -497,7 +499,8 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   // but exposes no public setter outside its bundle. The bridge below locates
   // that already-loaded store module through its shipped source map, imports
   // the same module instance, refreshes the system terminals through Open
-  // WebUI's API, and updates both stores. No page reload or DOM click is used.
+  // WebUI's API, and updates both stores. Native Files commands own opening
+  // the panel; no tab-state schema or synthetic terminal-picker click is used.
   // The resolved bridge is deliberately published under a named window key so
   // the unsupported boundary is explicit, inspectable, and replaceable.
   var selectionBeingApplied = '';
@@ -535,6 +538,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   };
 
   var generatedLocalName = function (map, code, sourceIndex, originalName) {
+    var sourceLines = String((map.sourcesContent || [])[sourceIndex] || '').split('\\n');
+    var declaration = new RegExp('^\\\\s*(?:export\\\\s+)?(?:const|let|var|function)\\\\s+' + originalName + '\\\\b');
+    var declarationLine = sourceLines.findIndex(function (line) { return declaration.test(line); });
     var source = 0;
     var originalLine = 0;
     var originalColumn = 0;
@@ -555,6 +561,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         if (fields.length < 5) continue;
         nameIndex += fields[4];
         if (source !== sourceIndex || map.names[nameIndex] !== originalName) continue;
+        if (declarationLine >= 0 && originalLine !== declarationLine) continue;
         var line = generatedLines[lineIndex] || '';
         var start = generatedColumn;
         var end = generatedColumn;
@@ -568,19 +575,17 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   };
 
   var exportedAlias = function (code, local) {
-    var start = code.lastIndexOf('export{');
-    if (start < 0) return null;
-    var end = code.indexOf('}', start);
-    if (end < 0) return null;
-    var pairs = code.slice(start + 7, end).split(',');
+    var blocks = Array.from(code.matchAll(/\\bexport\\s*\\{([^}]*)\\}/g));
+    if (!blocks.length) return null;
+    var pairs = blocks[blocks.length - 1][1].split(',');
     for (var i = 0; i < pairs.length; i++) {
       var sides = pairs[i].trim().split(/\\s+as\\s+/);
-      if (sides[0] === local && sides[1]) return sides[1];
+      if (sides[0] === local) return sides[1] || sides[0];
     }
     return null;
   };
 
-  var bridgeFromModule = function (module, aliases) {
+  var bridgeFromModule = function (module, aliases, openFiles) {
     var terminalServersStore = module[aliases.terminalServers];
     var selectedTerminalIdStore = module[aliases.selectedTerminalId];
     if (
@@ -606,6 +611,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       selectedTerminalId: selectedTerminalIdStore,
       showControls: module[aliases.showControls],
       showTabs: module[aliases.showTabs],
+      openFiles: openFiles,
       showSettings: module[aliases.showSettings],
       showFileNavPath: module[aliases.showFileNavPath],
       showFileNavDir: module[aliases.showFileNavDir]
@@ -633,17 +639,53 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       }
       urls = urls.filter(function (url, index, all) { return all.indexOf(url) === index; });
 
-      var inspect = function (index) {
-        if (index >= urls.length) return Promise.resolve(null);
-        var moduleUrl = urls[index];
-        return Promise.all([
+      var assetCache = {};
+      var asset = function (moduleUrl) {
+        if (!assetCache[moduleUrl]) assetCache[moduleUrl] = Promise.all([
           originalFetch.call(window, moduleUrl).then(function (response) {
             return response.ok ? response.text() : '';
           }),
           originalFetch.call(window, moduleUrl + '.map').then(function (response) {
             return response.ok ? response.json() : null;
           })
-        ]).then(function (parts) {
+        ]);
+        return assetCache[moduleUrl];
+      };
+      var nativeExport = function (suffix, name, index) {
+        if (index >= urls.length) return Promise.resolve(null);
+        return asset(urls[index]).then(function (parts) {
+          var code = parts[0], map = parts[1];
+          var sourceIndex = map && Array.isArray(map.sources)
+            ? map.sources.findIndex(function (source) { return String(source).split(String.fromCharCode(92)).join('/').endsWith(suffix); }) : -1;
+          if (!code || sourceIndex < 0) return nativeExport(suffix, name, index + 1);
+          var local = generatedLocalName(map, code, sourceIndex, name);
+          var alias = local && exportedAlias(code, local);
+          if (!alias) return nativeExport(suffix, name, index + 1);
+          return import(urls[index]).then(function (module) { return module[alias] || null; });
+        }).catch(function () { return nativeExport(suffix, name, index + 1); });
+      };
+      var nativeFilesOpener = function (module, aliases) {
+        return nativeExport('/src/lib/shortcuts.ts', 'keybindings', 0).then(function (bindings) {
+          if (!bindings || typeof readStore(bindings).openFiles !== 'string') return null;
+          return nativeExport('/src/lib/i18n/index.ts', 'i18n', 0).then(function (locale) {
+            return createNativeFilesOpener({
+              bindings: function () { return readStore(bindings); },
+              shortcutsEnabled: function () {
+                return !module[aliases.settings] || readStore(module[aliases.settings]).keyboardShortcuts !== false;
+              },
+              translate: function (key) {
+                var dictionary = locale && readStore(locale);
+                return dictionary && typeof dictionary.t === 'function' ? dictionary.t(key) || key : key;
+              }
+            });
+          });
+        });
+      };
+
+      var inspect = function (index) {
+        if (index >= urls.length) return Promise.resolve(null);
+        var moduleUrl = urls[index];
+        return asset(moduleUrl).then(function (parts) {
           var code = parts[0];
           var map = parts[1];
           if (!code || !map || !Array.isArray(map.sources) || !Array.isArray(map.names)) {
@@ -659,7 +701,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
           }
           if (sourceIndex < 0) return inspect(index + 1);
 
-          var names = ['terminalServers', 'selectedTerminalId', 'showControls', 'showTabs', 'showFileNavPath', 'showFileNavDir', 'tools', 'showSettings'];
+          var names = ['terminalServers', 'selectedTerminalId', 'showControls', 'showTabs', 'showFileNavPath', 'showFileNavDir', 'tools', 'showSettings', 'settings'];
           var aliases = {};
           for (var n = 0; n < names.length; n++) {
             var local = generatedLocalName(map, code, sourceIndex, names[n]);
@@ -667,7 +709,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
           }
           if (!aliases.terminalServers || !aliases.selectedTerminalId) return inspect(index + 1);
           return import(moduleUrl).then(function (module) {
-            return bridgeFromModule(module, aliases);
+            return nativeFilesOpener(module, aliases).then(function (openFiles) {
+              return bridgeFromModule(module, aliases, openFiles);
+            });
           });
         }).catch(function () { return inspect(index + 1); });
       };
@@ -701,7 +745,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var node = button;
     while (node) {
       if (
-        node.getAttribute && node.getAttribute('role') === 'button' &&
+        node.getAttribute && (node.getAttribute('role') === 'button' || node.tagName === 'BUTTON') &&
         node.getAttribute('aria-haspopup') === 'true'
       ) return node;
       node = node.parentElement;
@@ -729,8 +773,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         ? content.replace(/<[^>]*>/g, '').trim()
         : (content && content.textContent ? String(content.textContent).trim() : '');
       // During generation upstream uses a disabled button without a Dropdown.
-      // Its Terminal tooltip still identifies the control unambiguously.
-      if (semanticName !== 'Terminal') continue;
+      // Newer releases label this control with the selected terminal's name.
+      var bridge = window[STORE_BRIDGE_KEY];
+      var terminalLabel = bridge && typeof bridge.terminalLabel === 'function' ? bridge.terminalLabel() : null;
+      if (semanticName !== 'Terminal' && (!terminalLabel || semanticName !== terminalLabel || aria !== terminalLabel)) continue;
       if (found) return null;
       found = b;
     }

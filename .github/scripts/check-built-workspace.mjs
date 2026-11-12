@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type -- Plain JavaScript build fixtures. */
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -57,11 +58,19 @@ const leasesEnd = bundle.indexOf('\n}\n', leasesStart) + 2
 assert.ok(leasesEnd > leasesStart)
 const tabLeases = new Function('return (' + bundle.slice(leasesStart, leasesEnd) + ')')()
 assert.deepEqual(
-  tabLeases(['files:desktop-ws-open', 'opaque-editor-id'], ['desktop-ws-open', 'desktop-gh-editor']),
+  tabLeases(
+    ['files:desktop-ws-open', 'opaque-editor-id'],
+    ['desktop-ws-open', 'desktop-gh-editor']
+  ),
   ['desktop-ws-open', 'desktop-gh-editor']
 )
 const bridgeStart = bundle.indexOf('function createTerminalStoreBridge(')
 assert.ok(bridgeStart >= 0, 'Terminal store bridge must be bundled')
+const nativeOpenerStart = bundle.indexOf('function createNativeFilesOpener(')
+assert.ok(nativeOpenerStart >= 0, 'Native Files command adapter must be bundled')
+const nativeOpenerEnd = bundle.indexOf('\n}\n', nativeOpenerStart) + 2
+assert.ok(nativeOpenerEnd > nativeOpenerStart)
+new Function(`return (${bundle.slice(nativeOpenerStart, nativeOpenerEnd)})`)
 const bridgeEnd = bundle.indexOf('\n}\n', bridgeStart) + 2
 assert.ok(bridgeEnd > bridgeStart)
 const factory = new Function(`return (${bundle.slice(bridgeStart, bridgeEnd)})`)()

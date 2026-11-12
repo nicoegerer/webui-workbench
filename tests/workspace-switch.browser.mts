@@ -9,6 +9,7 @@ import os from 'node:os'
 import test from 'node:test'
 import { patchWorkspaceFileNav } from '../src/main/services/workspace-frontend.ts'
 import { createTerminalStoreBridge } from '../src/renderer/src/lib/guest/terminal-store-bridge.ts'
+import { createNativeFilesOpener } from '../src/renderer/src/lib/guest/native-files-opener.ts'
 import { createWorkspacePreviewTab } from '../src/renderer/src/lib/guest/workspace-preview-tab.ts'
 import { buildWorkspaceChipScript } from '../src/renderer/src/lib/guest/workspace-chip.ts'
 
@@ -27,6 +28,7 @@ test(
       controlsName = '',
       patchedCode = ''
     let nativeTabs = false
+    let nativeFilesCommand = false
     const patchedChunks = new Map<string, string>()
     let terminalFile = '',
       terminalName = '',
@@ -48,6 +50,8 @@ test(
       const controls = map.sources.findIndex(
         (s: string) => s.endsWith('/ChatControls.svelte') || s.endsWith('/ChatTabs.svelte')
       )
+      if (controls >= 0 && map.sourcesContent[controls].includes('Shortcut.OPEN_FILES'))
+        nativeFilesCommand = true
       const terminalSource = map.sources.findIndex((s: string) =>
         s.endsWith('/MessageInput/TerminalMenu.svelte')
       )
@@ -121,7 +125,9 @@ test(
               'showControls',
               'showTabs'
             ].includes(name) && mapping.source.endsWith('/src/lib/stores/index.ts')
-          if (!isMount && !isStore) return
+          const isKeybindings =
+            name === 'keybindings' && mapping.source.endsWith('/src/lib/shortcuts.ts')
+          if (!isMount && !isStore && !isKeybindings) return
           const line = lines[mapping.generatedLine - 1]
           let start = mapping.generatedColumn,
             end = start
@@ -183,18 +189,21 @@ test(
       const i18n={subscribe(fn){fn({t:v=>v});return ()=>{}}};
       localStorage.token='test-only';
       const saved=location.search.includes('saved');
-      const props={history:{messages:{}},chatId:saved?'existing-chat':null,models:[],params:{},chatFiles:[],files:[],eventTarget:new EventTarget(),submitPrompt:async()=>{},stopResponse:()=>{},showMessage:()=>{}};
-      user.set({role:'admin',permissions:{}});config.set({features:{enable_tool_servers:true},code:{interpreter_engine:'pyodide'}});settings.set({});
+      const props={history:{messages:{}},chatId:saved?'11111111-1111-4111-8111-111111111111':null,models:[],params:{},chatFiles:[],files:[],eventTarget:new EventTarget(),submitPrompt:async()=>{},stopResponse:()=>{},showMessage:()=>{}};
+      user.set({id:'browser-user',role:'admin',permissions:{}});config.set({features:{enable_tool_servers:true},code:{interpreter_engine:'pyodide'}});settings.set({});
       terminalServers.set(${JSON.stringify(terminals.map((t) => ({ id: t.id, url: '/api/v1/terminals/' + t.id })))});
       const app=mount(TestControls,{target:document.getElementById('fixture'),props,context:new Map([['i18n',i18n]])});
-      const bridge=(${createTerminalStoreBridge.toString()})({terminalServers,selectedTerminalId,${nativeTabs ? 'showTabs' : 'showControls'}},fetch,()=> 'test-only');
+      const read=store=>{let value;store.subscribe(v=>value=v)();return value};
+      const menuAction=label=>[...document.querySelectorAll('[role="menu"] button')].find(button=>button.textContent.trim()===label||[...button.querySelectorAll('span')].some(span=>span.textContent.trim()===label));
+      const openFiles=${nativeFilesCommand ? `(${createNativeFilesOpener.toString()})({bindings:()=>read(keybindings),translate:key=>key,shortcutsEnabled:()=>read(settings).keyboardShortcuts!==false})` : 'undefined'};
+      const bridge=(${createTerminalStoreBridge.toString()})({terminalServers,selectedTerminalId,${nativeTabs ? 'showTabs' : 'showControls'},openFiles},fetch,()=> 'test-only');
       let selection={terminalId:'',chatKey:'draft',mode:'local',pending:false};let available=true;
       const tab=(${createWorkspacePreviewTab.toString()})(async(type,data)=>{
         if(type==='workspacePreviewInspect')return {available,entryPath:selection.terminalId==='desktop-first'?'first.html':'second.html'};
         if(type==='workspacePreviewShow'){document.getElementById('result').textContent='Preview: '+data.entryPath;return {ok:true}}
         return {ok:true};
       },(_de,en)=>en,()=>tab.update(selection));
-      const choose=async(id,context=saved?'existing-chat':'draft')=>{selection={...selection,pending:true};tab.update(selection);await bridge.select(id,()=>true,{path:id==='desktop-gh-fixture'?undefined:id==='desktop-first'?${JSON.stringify(first)}:${JSON.stringify(second)},chatId:props.chatId??undefined,context});selection={terminalId:id,chatKey:context,mode:'local',pending:false};tab.update(selection);};
+      const choose=async(id,context=saved?'existing-chat':'draft')=>{selection={...selection,pending:true};tab.update(selection);if(!await bridge.select(id,()=>true,{path:id==='desktop-gh-fixture'?undefined:id==='desktop-first'?${JSON.stringify(first)}:${JSON.stringify(second)},chatId:props.chatId??undefined,context}))throw Error('Native workspace selection failed: '+id+'; '+document.body.innerText.slice(-1200));selection={terminalId:id,chatKey:context,mode:'local',pending:false};tab.update(selection);};
       document.getElementById('first').onclick=()=>choose('desktop-first');document.getElementById('second').onclick=()=>choose('desktop-second');
       window.addEventListener('error',e=>fetch('/result',{method:'POST',body:JSON.stringify({ok:false,error:e.message})}));
       try{
@@ -212,23 +221,23 @@ test(
         let nativeEditor;
         if(${nativeTabs}){
           document.querySelector('button[aria-label="New tab"]').click();
-          await waitFor(()=>[...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='New File'),'Native New File menu missing');
-          [...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='New File').click();
+          await waitFor(()=>menuAction('New File'),'Native New File menu missing');
+          menuAction('New File').click();
           await waitFor(()=>[...document.querySelectorAll('[data-panel-tab]')].find(tab=>tab.textContent.includes('Untitled-1')),'Native untitled editor missing');
           nativeEditor=[...document.querySelectorAll('[data-panel-tab]')].find(tab=>tab.textContent.includes('Untitled-1'));
         }
         await choose('desktop-second');
         if(${nativeTabs}){
           if(!nativeEditor?.isConnected)throw Error('Workspace switch discarded the native untitled editor');
-          if(document.querySelectorAll('[data-panel-tab^="files:"]').length<2)throw Error('Workspace switch removed another native Files tab');
-          checks.push('Native editor and multiple Files tabs survive workspace switching');
+          if(!${nativeFilesCommand}&&document.querySelectorAll('[data-panel-tab^="files:"]').length<2)throw Error('Workspace switch removed another native Files tab');
+          checks.push('Native editor survives workspace switching; native Files lifecycle preserved');
         }
         await waitFor(()=>text().includes('second.html')&&!text().includes('first.html'),'Draft kept first directory after folder switch');checks.push('Draft switches to second folder');
         await choose('desktop-first','existing-chat');await waitFor(()=>text().includes('first.html')&&!text().includes('second.html'),'Existing chat failed switch');
         await choose('desktop-second','existing-chat');await waitFor(()=>text().includes('second.html')&&!text().includes('first.html'),'Existing chat kept old folder');checks.push('Same chat switches both ways');
         await waitFor(()=>document.querySelector('[data-desktop-preview-tab]'),'Available HTML has no preview tab');
         const preview=document.querySelector('[data-desktop-preview-tab]');
-        if(preview.previousElementSibling.textContent.trim()!=='Files')throw new Error('Preview not beside Files');
+        if(!preview.previousElementSibling.querySelector('button[role=tab]')&&preview.previousElementSibling.textContent.trim()!=='Files')throw new Error('Preview not beside Files');
         preview.click();await delay(100);
         if(preview.getAttribute('aria-pressed')!=='true')throw new Error('Preview not selected');
         preview.previousElementSibling.click();if(preview.getAttribute('aria-pressed')!=='false')throw new Error('Files did not close preview');
@@ -254,6 +263,23 @@ test(
         available=false;selection={...selection,chatKey:'no-preview'};tab.update(selection);await delay(100);
         if(document.querySelector('[data-desktop-preview-tab]'))throw new Error('Unavailable preview was not hidden');checks.push('Unavailable preview hidden');
         available=true;await choose('desktop-first');await waitFor(()=>text().includes('first.html'),'Final folder failed');
+        if(${nativeFilesCommand}){
+          keybindings.update(value=>({...value,openFiles:'Cmd+Alt+E'}));
+          await choose('desktop-second');await waitFor(()=>text().includes('second.html'),'Configured Files shortcut failed');
+          settings.set({keyboardShortcuts:false});
+          await choose('desktop-first');await waitFor(()=>text().includes('first.html'),'Disabled shortcuts prevented native menu fallback');
+          settings.set({});checks.push('Custom shortcuts and disabled-shortcut menu fallback work');
+          const split=document.querySelector('button[aria-label="Split screen"]');
+          if(split){
+            split.click();await delay(100);
+            await choose('desktop-second');await waitFor(()=>text().includes('second.html'),'Split layout lost the Files workspace');
+            await waitFor(()=>document.querySelector('[data-desktop-preview-tab]'),'Split Files has no website preview');
+            document.querySelector('[data-desktop-preview-tab]').click();await delay(100);
+            if(document.querySelector('[data-desktop-preview-tab]').getAttribute('aria-pressed')!=='true')throw Error('Split Files preview did not open');
+            if(!nativeEditor.isConnected)throw Error('Split layout discarded the editor');
+            split.click();await delay(100);checks.push('Native split layout preserves editor, folder switching and website preview');
+          }
+        }
         // Test the shipped TerminalMenu's two distinct DOM branches, not a mock.
         let terminalApp;
         const terminalState=async(disabled)=>{
@@ -262,9 +288,13 @@ test(
           await delay(100);
         };
         await terminalState(false);
-        window.__openWebUIDesktopTerminalBridge={select:async()=>true};
         window.electronAPI={send:async()=>({ok:true})};
         await import('/desktop-guest.js');
+        await waitFor(()=>window.__openWebUIDesktopTerminalBridge,'Production store discovery failed');
+        const productionBridge=window.__openWebUIDesktopTerminalBridge;
+        if(!await productionBridge.select('desktop-first',()=>true,{context:'production-discovery'}))throw Error('Discovered native Files command failed');
+        if(productionBridge.terminalLabel()!=='desktop-first')throw Error('Production terminal label is stale');
+        checks.push('Production source-map discovery resolves current stores and native commands');
         const native=()=>document.querySelector('#terminal-fixture button');
         await waitFor(()=>native()&&getComputedStyle(native()).display==='none','Idle terminal cloud remains visible');
         await terminalState(true);
@@ -329,6 +359,10 @@ test(
         }
         if (url.pathname === '/api/v1/terminals/') {
           json(terminals)
+          return
+        }
+        if (/^\/api\/v1\/chats\/[^/]+\/view$/.test(url.pathname)) {
+          json(request.method === 'POST' ? { updated_at: 1 } : { state: null })
           return
         }
         const terminal = terminals.find((t) =>

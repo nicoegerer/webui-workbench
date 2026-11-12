@@ -117,6 +117,36 @@ test('ChatTabs opens the selected workspace without null selection or pruning na
   assert.equal(tabs.value, false)
 })
 
+test('native Files commands run after selection, preserve turn state and retry an unready panel', async () => {
+  const h = setup()
+  const tabs = writable<boolean | 'files'>(false)
+  const commands: string[] = []
+  let ready = false
+  const bridge = createTerminalStoreBridge(
+    {
+      ...h.stores,
+      showTabs: tabs,
+      openFiles: async (id, current) => {
+        assert.equal(h.stores.selectedTerminalId.value, id)
+        assert.equal(current(), true)
+        commands.push(id)
+        return ready
+      }
+    },
+    async () => Response.json([{ id: 'desktop-ws-white', name: 'Selected project' }]),
+    () => ''
+  )
+  const workspace = { context: 'same-chat' }
+  assert.equal(await bridge.select('desktop-ws-white', () => true, workspace), false)
+  ready = true
+  assert.equal(await bridge.select('desktop-ws-white', () => true, workspace), true)
+  assert.equal(await bridge.select('desktop-ws-white', () => true, workspace), true)
+  assert.deepEqual(commands, ['desktop-ws-white', 'desktop-ws-white'])
+  assert.deepEqual(tabs.changes, [], 'Native commands own opening the current panel')
+  assert.ok(!h.stores.selectedTerminalId.changes.includes(null), 'Never prune open native editors')
+  assert.equal(bridge.terminalLabel(), 'Selected project')
+})
+
 test('same-chat turns preserve hidden Files while a website preview is open', async () => {
   const h = setup()
   await h.bridge.select('desktop-ws-test', () => true, { context: 'chat-a' })

@@ -16,6 +16,21 @@ test('the injected script is syntactically valid JavaScript', () => {
   assert.doesNotThrow(() => new Function(script()))
 })
 
+test('native export discovery accepts compact, spaced and unaliased exports', () => {
+  const source = script()
+  const start = source.indexOf('var exportedAlias = function')
+  const end = source.indexOf('var bridgeFromModule', start)
+  const exported = new Function(source.slice(start, end) + '; return exportedAlias;')()
+  for (const code of [
+    'export{store as a};',
+    'export { store as a };',
+    'export {\nstore as a, other\n};'
+  ])
+    assert.equal(exported(code, 'store'), 'a')
+  assert.equal(exported('export { store };', 'store'), 'store')
+  assert.equal(exported('export{other as a};', 'store'), null)
+})
+
 test('the payload rewriter survives being injected as text', () => {
   const source = script()
 
@@ -602,7 +617,6 @@ test('rendering settles instead of driving itself in a loop', async () => {
   assert.equal(h.renderCount(), mounted, 'the page must go quiet once the chip is up')
 })
 
-
 test('only the workspaces conversations still point at are kept open', async () => {
   const h = run({
     'chat-123': { mode: 'local', terminalId: 'desktop-ws-aaa', label: 'test1' },
@@ -638,7 +652,6 @@ test('the same folder used by two conversations is reported once', async () => {
   const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
   assert.deepEqual(keepAlive[0].ids, ['desktop-ws-aaa'])
 })
-
 
 test('the workspace picked before sending survives the chat getting an id', async () => {
   const h = run({

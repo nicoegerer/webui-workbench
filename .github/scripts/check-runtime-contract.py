@@ -94,6 +94,7 @@ def check_contract(webui_version, terminal_version, frontend_output=None):
     panel_sources = ('src/lib/components/chat/ChatControls.svelte',
                      'src/lib/components/chat/ChatTabs.svelte')
     panel_source = None
+    shortcuts_source = ''
     for name in webui.namelist():
         if not name.endswith('.js.map') or '/_app/immutable/' not in name:
             continue
@@ -102,21 +103,23 @@ def check_contract(webui_version, terminal_version, frontend_output=None):
             subprocess.run(['node', '--experimental-strip-types', str(ROOT / '.github/scripts/check-workspace-frontend.mts')],
                            input=json.dumps({'code': webui.read(name[:-4]).decode(), 'map': source_map}), text=True, check=True)
         for source, content in zip(source_map.get('sources', []), source_map.get('sourcesContent', [])):
+            if source.endswith('/src/lib/shortcuts.ts'):
+                shortcuts_source = content
             for target in wanted:
                 if source.endswith(target):
                     frontend_sources[target] = content
             if any(source.endswith(target) for target in panel_sources):
                 panel_source = content
-        if len(frontend_sources) == len(wanted) and panel_source is not None:
-            break
     assert len(frontend_sources) == len(wanted) and panel_source is not None, 'Required shipped frontend source maps are missing'
     stores = frontend_sources[wanted[0]]
     for name in ('terminalServers', 'selectedTerminalId', 'showFileNavPath', 'showFileNavDir', 'tools'):
         assert f'export const {name}' in stores, f'Frontend store contract changed: {name}'
     assert 'export const showControls' in stores or 'export const showTabs' in stores
     if 'export const showTabs' in stores:
-        assert "$showTabs === 'files' && showFilesTab" in panel_source, (
-            'Native ChatTabs no longer accepts the workspace Files request')
+        legacy_files_request = "$showTabs === 'files' && showFilesTab" in panel_source
+        native_files_command = all(name in shortcuts_source for name in ('OPEN_FILES', 'openFiles', 'keybindings')) and (
+            'Shortcut.OPEN_FILES' in panel_source and 'matchKeybinding' in panel_source)
+        assert legacy_files_request or native_files_command, 'Native workspace Files action is missing'
         assert 'terminalId={tab.terminalId}' in panel_source and 'initialDirectory=' in panel_source
     else:
         assert "activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId" in panel_source

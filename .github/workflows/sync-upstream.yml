@@ -16,6 +16,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'src/main/services/workspace-frontend.ts'
+      - 'src/renderer/src/lib/guest/**'
+      - 'tests/workspace-switch.browser.mts'
       - 'src/shared/runtime-versions.json'
   schedule:
     - cron: '17 6 * * *'
@@ -71,11 +73,17 @@ jobs:
       - name: Verify candidate before publishing any branch
         # Also verify one-time setup changes even if upstream has no new commit.
         if: steps.candidate.outputs.changed == 'true' || github.event_name == 'push'
+        env:
+          OPEN_WEBUI_FRONTEND: ${{ runner.temp }}/sync-frontend
+          ELECTRON_DISABLE_SANDBOX: '1'
         run: |
           npm ci
           npm run test:ipc
           npm run build
-          python .github/scripts/check-runtime-contract.py
+          python .github/scripts/check-runtime-contract.py --frontend-output "$OPEN_WEBUI_FRONTEND"
+          node node_modules/electron/install.js
+          xvfb-run --auto-servernum node --experimental-strip-types --test tests/workspace-preview.browser.mts tests/workspace-switch.browser.mts tests/settings-locales.browser.mts tests/service-settings.browser.mts
+          WORKSPACE_BROWSER_WIDTH=640 xvfb-run --auto-servernum node --experimental-strip-types --test tests/workspace-switch.browser.mts
 
       - name: Keep the schedule active during long upstream pauses
         if: steps.candidate.outputs.changed == 'false'

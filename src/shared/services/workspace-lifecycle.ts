@@ -12,7 +12,7 @@ export function nativeTabWorkspaceLeases(tabIds: string[], registeredIds: string
       if (managed(id.slice(6))) keep.add(id.slice(6))
       continue
     }
-    if (['chat', 'artifacts', 'preview', 'voice', 'comments'].includes(id)) continue
+    if (['chat', 'main-chat', 'artifacts', 'preview', 'voice', 'comments'].includes(id)) continue
     try {
       const parts = JSON.parse(id)
       if (Array.isArray(parts) && ['file', 'browser', 'desktop'].includes(parts[0])) {
